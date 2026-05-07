@@ -753,7 +753,7 @@ fn divide(a: float, b: float) -> float {
     if b == 0.0 {
         throw DivisionByZero
     }
-    return a / b
+    a / b
 }
 ```
 
