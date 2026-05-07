@@ -133,6 +133,7 @@ intersection_type  = nullable_type, { "&", nullable_type } ;
 nullable_type      = primary_type, [ "?" ] ;
 
 primary_type       = primitive_type
+                   | wildcard_type
                    | type_ref
                    | list_type
                    | map_type
@@ -140,6 +141,7 @@ primary_type       = primitive_type
                    | "Self" ;
 
 primitive_type     = "int" | "float" | "bool" | "string" | "unit" ;
+wildcard_type      = "_" ;
 type_ref           = type_name, [ generic_args ] ;
 list_type          = "[", type, "]" ;
 map_type           = "{", type, ":", type, "}" ;
