@@ -1,3 +1,14 @@
+fn sqrt_iter!(n: float, x: float) -> float {
+    const refined = (x + n / x) / 2.0
+    if refined == x { ^x }
+    sqrt_iter(n, refined)
+}
+
+fn sqrt!(n: float) -> float {
+    if n <= 0.0 { ^0.0 }
+    sqrt_iter(n, n / 2.0)
+}
+
 entity Vector {
     x!: float
     y!: float
@@ -13,7 +24,7 @@ entity Vector {
 
     fn dot(other: Vector) -> float {
         self.x * other.x + self.y * other.y + self.z * other.z
-    } 
+    }
 
     fn normalized() -> Vector {
         const mag = magnitude()
@@ -37,17 +48,20 @@ entity Point = Vector
 
 entity Collider {
     radius!: Vector
+    position: Point
 
     fn is_hit(other: Collider) -> bool {
-        (this.radius - other.radius).squared_magnitude() <= ((self.radius + other.radius) * (self.radius + other.radius))
+        const diff = self.position - other.position
+        const sum  = self.radius + other.radius
+        diff.squared_magnitude() <= sum.squared_magnitude()
     }
 }
 
 entity Particle {
-    position: Point
     velocity: Vector
     acceleration: Vector
     mass: float
+    collider: Collider
 
     mut fn apply_impulse(impulse: Vector) -> unit {
         velocity = velocity + Vector(impulse.x / mass, impulse.y / mass, impulse.z / mass)
@@ -58,16 +72,32 @@ entity Particle {
         const normal = velocity.normalized()
         let velocity_along_normal = relative_velocity.dot(normal)
 
-        const restitution = 1
-        const impulse_magnitude = (-(1 + restitution) * velocity_along_normal) / ((1 / self.mass) + (1 / other.mass))
+        const restitution = 1.0
+        const impulse_magnitude = (-(1.0 + restitution) * velocity_along_normal) / ((1.0 / self.mass) + (1.0 / other.mass))
 
-        const impulse = impulse_magnitude * normal
-        
-        apply_impulse(impulse * -1)
+        const impulse = normal * impulse_magnitude
+
+        apply_impulse(impulse * -1.0)
         other.apply_impulse(impulse)
-    } 
+    }
 }
 
 fn main!() -> int {
-    
+    printf("%lf",sqrt(25))
+    printf("\n")
+
+    let p1 = Particle()
+    p1.collider = Collider()
+    let p1_collider = p1.collider
+    p1_collider.radius = Vector(1,1,1)
+    p1_collider.position = Point(1,1,1)
+
+    let p2 = Particle()
+    p2.collider = Collider()
+    let p2_collider = p2.collider
+    p2_collider.radius = Vector(1,1,1)
+    p2_collider.position = Point(1,1,1)
+
+    printf("%d", p1_collider.is_hit(p2_collider))
+    0
 }
