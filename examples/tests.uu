@@ -47,13 +47,13 @@ entity Vector {
 entity Point = Vector
 
 entity Collider {
-    radius!: Vector
+    radius: float
     position: Point
 
     fn is_hit(other: Collider) -> bool {
-        const diff = self.position - other.position
-        const sum  = self.radius + other.radius
-        diff.squared_magnitude() <= sum.squared_magnitude()
+        const dist2 = (self.position - other.position).squared_magnitude()
+        const r_sum = self.radius + other.radius
+        dist2 <= r_sum * r_sum
     }
 }
 
@@ -87,17 +87,11 @@ fn main!() -> int {
     printf("\n")
 
     let p1 = Particle()
-    p1.collider = Collider()
-    let p1_collider = p1.collider
-    p1_collider.radius = Vector(1,1,1)
-    p1_collider.position = Point(1,1,1)
+    p1.collider = Collider(1, Point(1,1,1))
 
     let p2 = Particle()
-    p2.collider = Collider()
-    let p2_collider = p2.collider
-    p2_collider.radius = Vector(1,1,1)
-    p2_collider.position = Point(1,1,1)
+    p2.collider = Collider(3, Point(1,5.0000001,1))
 
-    printf("%d", p1_collider.is_hit(p2_collider))
+    printf("%d", p1.collider.is_hit(p2.collider))
     0
 }
