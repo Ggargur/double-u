@@ -46,6 +46,13 @@ def main():
     check("let float",        'let y = 3.14\n')
     check("typed binding",    'const s: string = "hello"\n')
     check("null binding",     'let z: int? = null\n')
+    check("compound assign", """\
+fn bump!() -> int {
+    let c = 1
+    c += 2
+    c
+}
+""")
 
     section("Arithmetic expressions")
     check("add",              'const a = 1 + 2\n')
@@ -62,6 +69,7 @@ def main():
     check("list literal",     'const xs = [1, 2, 3]\n')
     check("empty list typed", 'const ys: [int] = []\n')
     check("map literal",      'const m = {"a": 1, "b": 2}\n')
+    check("empty map",        'const m = {}\n')
 
     section("Functions")
     check("simple fn", 'fn add!(a: int, b: int) -> int { a + b }\n')
@@ -71,6 +79,7 @@ fn abs!(x: int) -> int {
     x
 }
 """)
+    check("where inline", 'fn wrap!<T>(v: T) -> T where T: int { v }\n')
 
     section("Entities")
     check("basic entity", """\
@@ -95,11 +104,13 @@ entity Position {
     }
 }
 """)
+    check("entity alias", 'entity Id = int\n')
 
     section("Capabilities")
     check("capability decl", 'capability Movable = {mut move(float, float) -> unit}\n')
     check("capability alias", 'capability Drawable = {draw(Canvas) -> unit}\n')
     check("capability wildcard args", 'fn push!(thing: {move(_, _)}) -> unit { }\n')
+    check("capability like", 'capability Pushable = {push like vector.push}\n')
 
     section("Control flow")
     check("if else", """\
@@ -130,6 +141,14 @@ fn describe_shape!(thing: Shape) -> string {
     }
 }
 """)
+    check("match guard", """\
+fn quadrant!(p: Point) -> string {
+    match p {
+        Point(x: x, y: y) if x > 0 and y > 0 => "q1",
+        _ => "other"
+    }
+}
+""")
 
     section("Try/catch")
     check("try catch", """\
@@ -139,6 +158,12 @@ fn safe_div!(a: float, b: float) -> float {
     } catch DivisionByZero {
         0.0
     }
+}
+""")
+    check("try catch named", """\
+fn safe_div2!(a: float, b: float) -> float {
+    try { divide(a, b) }
+    catch err: DivisionByZero { 0.0 }
 }
 """)
 
@@ -189,6 +214,7 @@ fn divide!(a: float, b: float) -> float {
     section("Imports")
     check("simple import", 'import physics\n')
     check("import with items", 'import animation.{move as animate}\n')
+    check("dotted import", 'import graphics.canvas\n')
 
     section("Spawn & select")
     check("spawn", """\
@@ -239,6 +265,8 @@ fn multiplex!() -> unit {
     }
 }
 """)
+    check_fail("missing comma in args", 'fn bad!(x: int y: int) -> int { x }\n')
+    check_fail("unterminated list", 'const xs = [1, 2\n')
 
     if _failures:
         print(f"\n{_failures} failure(s).")

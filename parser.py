@@ -391,16 +391,21 @@ class LangTransformer(Transformer):
 
     def entity_decl(self, items):
         attrs = [i for i in items if isinstance(i, Attribute)]
-        rest  = [i for i in items if not isinstance(i, Attribute)]
-        name     = self._s(rest[0])
-        generics = rest[1] if len(rest) > 1 and isinstance(rest[1], list) else None
-        members  = [i for i in rest[1:] if isinstance(i, Node)]
+        tokens = [i for i in items if isinstance(i, Token)]
+        lists = [i for i in items if isinstance(i, list)]
+        nodes = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
+        name = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        members = [i for i in nodes if isinstance(i, (FieldDecl, MethodDecl, ConstructorDecl))]
         return EntityDecl(attrs, name, generics, members)
 
     def entity_alias(self, items):
-        name     = self._s(items[0])
-        generics = items[1] if len(items) > 2 else None
-        target   = items[-1]
+        tokens = [i for i in items if isinstance(i, Token)]
+        lists = [i for i in items if isinstance(i, list)]
+        nodes = [i for i in items if isinstance(i, Node)]
+        name = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        target = nodes[-1]
         return EntityAlias(name, generics, target)
 
     def entity_member(self, items):
@@ -420,14 +425,14 @@ class LangTransformer(Transformer):
         attrs   = [i for i in items if isinstance(i, Attribute)]
         tokens  = [i for i in items if isinstance(i, Token)]
         nodes   = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
+        lists   = [i for i in items if isinstance(i, list)]
 
         mut    = any(self._s(t) == "mut" for t in tokens)
         name   = self._s(next(t for t in tokens if t.type == "IDENTIFIER"))
         public = any(self._s(t) == "!" for t in tokens)
 
-        generics = next((n for n in nodes if isinstance(n, list)), None)
-        params_  = next((n for n in nodes if isinstance(n, list) and
-                         n and isinstance(n[0], Param)), None)
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        params_  = next((n for n in lists if n and isinstance(n[0], Param)), None)
         where_   = next((n for n in nodes if isinstance(n, WhereClause)), None)
         body     = next((n for n in nodes if isinstance(n, Block)), None)
         ret      = next((n for n in nodes if isinstance(n, Node) and
@@ -437,7 +442,8 @@ class LangTransformer(Transformer):
     def constructor_decl(self, items):
         attrs  = [i for i in items if isinstance(i, Attribute)]
         nodes  = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
-        params_ = next((n for n in nodes if isinstance(n, list)), None)
+        lists  = [i for i in items if isinstance(i, list)]
+        params_ = next((n for n in lists if n and isinstance(n[0], Param)), None)
         body   = next((n for n in nodes if isinstance(n, Block)), None)
         return ConstructorDecl(attrs, params_, body)
 
@@ -445,9 +451,10 @@ class LangTransformer(Transformer):
 
     def capability_decl(self, items):
         tokens = [i for i in items if isinstance(i, Token)]
-        name   = self._s(tokens[0])
+        name = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
         nodes  = [i for i in items if isinstance(i, Node)]
-        generics = next((n for n in nodes if isinstance(n, list)), None)
+        lists  = [i for i in items if isinstance(i, list)]
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
         body     = next((n for n in nodes if isinstance(n, CapabilityBody)), None)
         return CapabilityDecl(name, generics, body)
 
@@ -486,8 +493,10 @@ class LangTransformer(Transformer):
     # ── attributes & exceptions ───────────────────────────────────────────────
 
     def attribute_decl(self, items):
-        name    = self._s(items[0])
-        params_ = next((i for i in items if isinstance(i, list)), None)
+        tokens = [i for i in items if isinstance(i, Token)]
+        lists = [i for i in items if isinstance(i, list)]
+        name = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
+        params_ = next((n for n in lists if n and isinstance(n[0], Param)), None)
         return AttributeDecl(name, params_)
 
     def attribute_line(self, items):
@@ -500,8 +509,10 @@ class LangTransformer(Transformer):
         return Attribute(name, args)
 
     def exception_decl(self, items):
-        name    = self._s(items[0])
-        params_ = next((i for i in items if isinstance(i, list)), None)
+        tokens = [i for i in items if isinstance(i, Token)]
+        lists = [i for i in items if isinstance(i, list)]
+        name = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
+        params_ = next((n for n in lists if n and isinstance(n[0], Param)), None)
         return ExceptionDecl(name, params_)
 
     # ── functions ─────────────────────────────────────────────────────────────
@@ -510,14 +521,13 @@ class LangTransformer(Transformer):
         attrs  = [i for i in items if isinstance(i, Attribute)]
         tokens = [i for i in items if isinstance(i, Token)]
         nodes  = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
+        lists  = [i for i in items if isinstance(i, list)]
 
         name   = self._s(next(t for t in tokens if t.type == "IDENTIFIER"))
         public = any(self._s(t) == "!" for t in tokens)
 
-        generics = next((n for n in nodes if isinstance(n, list) and
-                         (not n or isinstance(n[0], GenericParam))), None)
-        params_  = next((n for n in nodes if isinstance(n, list) and
-                         n and isinstance(n[0], Param)), None)
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        params_  = next((n for n in lists if n and isinstance(n[0], Param)), None)
         where_   = next((n for n in nodes if isinstance(n, WhereClause)), None)
         body     = next((n for n in nodes if isinstance(n, Block)), None)
         # ret is the remaining non-list, non-clause, non-block Node
@@ -548,7 +558,8 @@ class LangTransformer(Transformer):
 
     def generic_args(self, items): return items
 
-    def where_clause(self, items): return WhereClause(items)
+    def where_clause(self, items):
+        return WhereClause([i for i in items if isinstance(i, WhereBound)])
 
     def where_bound(self, items):
         return WhereBound(self._s(items[0]), items[1])
