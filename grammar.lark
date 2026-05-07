@@ -1,0 +1,283 @@
+// ============================================================
+//  Lark grammar for the experimental language
+//  Uses Earley parser with named keyword terminals
+// ============================================================
+
+start: _NL* (import_stmt | top_level_decl | _NL)*
+
+// ── IMPORTS ──────────────────────────────────────────────────
+
+import_stmt: IMPORT qualified_name ("." "{" import_items "}")? _NL
+import_items: import_item ("," import_item)*
+import_item: IDENTIFIER (AS IDENTIFIER)?
+qualified_name: IDENTIFIER ("." IDENTIFIER)*
+
+// ── TOP-LEVEL ─────────────────────────────────────────────────
+
+top_level_decl: entity_decl
+              | entity_alias
+              | capability_decl
+              | extend_decl
+              | attribute_decl
+              | exception_decl
+              | function_decl
+              | binding
+
+// ── ENTITIES ──────────────────────────────────────────────────
+
+entity_decl:  attribute_line* ENTITY TYPE_NAME generic_params? "{" _NL* entity_member* "}"
+entity_alias: ENTITY TYPE_NAME generic_params? "=" type _NL
+
+entity_member: (field_decl | method_decl | constructor_decl) _NL*
+
+field_decl:      attribute_line* IDENTIFIER PUBLIC? ":" type ("=" expression)? _NL
+method_decl:     attribute_line* MUT? FN IDENTIFIER PUBLIC? generic_params? "(" params? ")" (ARROW type)? _NL* where_clause? block
+constructor_decl: attribute_line* CONSTRUCTOR "(" params? ")" block
+
+// ── CAPABILITIES ──────────────────────────────────────────────
+
+capability_decl: CAPABILITY TYPE_NAME generic_params? "=" capability_body _NL
+capability_body: "{" cap_member_list "}"
+cap_member_list: capability_member ("," capability_member)*
+capability_member: IDENTIFIER ":" type                                        -> cap_field
+                 | MUT? IDENTIFIER "(" type_list? ")" (ARROW type)?          -> cap_method
+                 | MUT? IDENTIFIER LIKE qualified_name                        -> cap_like
+
+// ── EXTEND ────────────────────────────────────────────────────
+
+extend_decl: EXTEND type "{" _NL* (method_decl _NL*)* "}"
+
+// ── ATTRIBUTES & EXCEPTIONS ───────────────────────────────────
+
+attribute_decl: ATTRIBUTE TYPE_NAME ("(" params? ")")? _NL
+// attribute_line is an attribute followed by optional newline (before the decl)
+attribute_line: attribute _NL*
+attribute: "@" qualified_name ("(" argument_list? ")")?
+exception_decl: EXCEPTION TYPE_NAME ("(" params? ")")? _NL
+
+// ── FUNCTIONS ─────────────────────────────────────────────────
+
+function_decl: attribute_line* FN IDENTIFIER PUBLIC? generic_params? "(" params? ")" (ARROW type)? _NL* where_clause? block
+
+// ── BINDINGS ──────────────────────────────────────────────────
+
+binding: BINDING_KW IDENTIFIER (":" type)? "=" expression _NL
+
+// ── GENERICS ──────────────────────────────────────────────────
+
+generic_params: "<" generic_param ("," generic_param)* ">"
+generic_param: TYPE_NAME (":" type)? ("=" type)?
+generic_args: "<" type ("," type)* ">"
+where_clause: WHERE _NL* where_bound ("," _NL* where_bound)* _NL*
+where_bound: TYPE_NAME ":" type
+
+// ── PARAMS ────────────────────────────────────────────────────
+
+params: param ("," param)*
+param: attribute_line* IDENTIFIER ":" type ("=" expression)?
+
+// ── TYPES ─────────────────────────────────────────────────────
+
+type: intersection_type
+intersection_type: nullable_type ("&" nullable_type)*
+nullable_type: primary_type NULLABLE?
+
+primary_type: primitive_type
+            | SELF_TYPE                -> self_type
+            | wildcard_type
+            | list_type
+            | map_type
+            | anonymous_capability
+            | type_ref
+
+wildcard_type: "_"
+
+primitive_type: PRIMITIVE_KW
+type_ref: TYPE_NAME generic_args?
+list_type: "[" type "]"
+map_type: "{" type ":" type "}"
+anonymous_capability: capability_body
+type_list: type ("," type)*
+
+// ── STATEMENTS ────────────────────────────────────────────────
+// _NL? at the end of terminal statements so they work inside
+// single-line blocks like: if cond { stmt }
+
+statement: binding
+         | assignment
+         | if_stmt
+         | for_stmt
+         | match_stmt
+         | try_stmt
+         | throw_stmt
+         | early_return
+         | spawn_stmt
+         | select_stmt
+         | expression_stmt
+
+assignment:      lvalue ASSIGN_OP expression _NL?
+lvalue:          postfix_expr
+expression_stmt: expression _NL
+
+// if/for/match etc. already end with a block (`}`), no trailing _NL needed
+if_stmt:   IF expression block (ELSE (if_stmt | block))?
+for_stmt:  FOR IDENTIFIER IN expression block
+match_stmt: MATCH expression "{" _NL* match_arm ("," _NL* match_arm)* _NL* "}"
+match_arm: pattern (IF expression)? "=>" (expression | block)
+
+try_stmt:    TRY block _NL* catch_clause (_NL* catch_clause)*
+catch_clause: CATCH (IDENTIFIER ":")? type_ref block
+
+throw_stmt:   THROW expression _NL?
+early_return: "^" expression? _NL?
+
+spawn_stmt: SPAWN block
+
+select_stmt: SELECT "{" _NL* select_arm ("," _NL* select_arm)* _NL* "}"
+select_arm: (IDENTIFIER CHAN_RECV expression | TIMEOUT "(" expression ")") "=>" (expression | block)
+
+// ── BLOCK ─────────────────────────────────────────────────────
+
+block: "{" _NL* block_body "}"
+block_body: (_NL* statement)* _NL* expression? _NL*
+
+// ── EXPRESSIONS ───────────────────────────────────────────────
+
+expression: or_expr
+
+or_expr:            and_expr       (OR      and_expr)*
+and_expr:           coalesce_expr  (AND     coalesce_expr)*
+coalesce_expr:      equality_expr  (COALESCE equality_expr)*
+equality_expr:      comparison_expr (EQ_OP  comparison_expr)*
+comparison_expr:    additive_expr  (CMP_OP  additive_expr)*
+additive_expr:      multiplicative_expr (ADD_OP multiplicative_expr)*
+multiplicative_expr: unary_expr    (MUL_OP  unary_expr)*
+
+unary_expr: UNARY_OP unary_expr -> unary_op
+          | postfix_expr
+
+postfix_expr: primary_expr postfix_op*
+
+postfix_op: "." IDENTIFIER         -> field_access
+          | OPT_CHAIN IDENTIFIER   -> optional_chain
+          | "(" argument_list? ")" -> call
+          | "[" expression "]"     -> index
+          | NON_NULL               -> non_null
+
+primary_expr: literal
+            | SELF_EXPR            -> self_expr
+            | "(" expression ")"   -> grouped
+            | list_literal
+            | map_literal
+            | constructor_call
+            | early_return_expr
+            | if_expr
+            | match_expr
+            | TYPE_NAME            -> name_expr
+            | IDENTIFIER           -> name_expr
+
+early_return_expr: "^" expression?
+if_expr:    if_stmt
+match_expr: match_stmt
+
+// ── LITERALS ──────────────────────────────────────────────────
+
+literal: FLOAT_LIT   -> float_lit
+       | INT_LIT     -> int_lit
+       | STRING_LIT  -> string_lit
+       | BOOL_LIT    -> bool_lit
+       | NULL_LIT    -> null_lit
+
+list_literal: "[" (expression ("," expression)*)? "]"
+map_literal: "{" (map_entry ("," map_entry)*)? "}"
+map_entry: expression ":" expression
+
+constructor_call: TYPE_NAME generic_args? "(" argument_list? ")"
+
+argument_list: argument ("," argument)*
+argument: (IDENTIFIER ":")? expression
+
+// ── PATTERNS ──────────────────────────────────────────────────
+
+pattern: "_"               -> wildcard_pat
+       | literal           -> literal_pat
+       | nominal_pattern
+       | structural_pattern
+       | IDENTIFIER        -> binding_pat
+
+nominal_pattern: TYPE_NAME ("(" (pattern_arg ("," pattern_arg)*)? ")")?
+pattern_arg: IDENTIFIER ":" pattern    -> named_pattern_arg
+           | pattern                   -> pos_pattern_arg
+
+structural_pattern: "{" structural_member ("," structural_member)* "}"
+structural_member: IDENTIFIER ":" type                           -> struct_field_member
+                 | IDENTIFIER "(" type_list? ")" ARROW type     -> struct_method_member
+                 | IDENTIFIER LIKE qualified_name                -> struct_like_member
+
+// ── TERMINALS: KEYWORDS (priority 2 beats IDENTIFIER priority 0) ──
+
+IMPORT.2:      "import"
+AS.2:          "as"
+ENTITY.2:      "entity"
+CAPABILITY.2:  "capability"
+EXTEND.2:      "extend"
+ATTRIBUTE.2:   "attribute"
+EXCEPTION.2:   "exception"
+FN.2:          "fn"
+MUT.2:         "mut"
+CONSTRUCTOR.2: "constructor"
+BINDING_KW.2:  "const" | "let"
+IF.2:          "if"
+ELSE.2:        "else"
+FOR.2:         "for"
+IN.2:          "in"
+MATCH.2:       "match"
+TRY.2:         "try"
+CATCH.2:       "catch"
+THROW.2:       "throw"
+SPAWN.2:       "spawn"
+SELECT.2:      "select"
+TIMEOUT.2:     "timeout"
+WHERE.2:       "where"
+LIKE.2:        "like"
+OR.2:          "or"
+AND.2:         "and"
+SELF_EXPR.2:   "self"
+SELF_TYPE.2:   "Self"
+PRIMITIVE_KW.2: "int" | "float" | "bool" | "string" | "unit"
+BOOL_LIT.2:    "true" | "false"
+NULL_LIT.2:    "null"
+
+// ── TERMINALS: MULTI-CHAR OPERATORS (priority 3 > single-char) ──
+
+COALESCE.3:        "??"
+OPT_CHAIN.3:       "?."
+NON_NULL.3:        "!!"
+ARROW.3:           "->"
+CHAN_RECV.3:       "<-"
+ASSIGN_OP.3:       "=" | "+=" | "-=" | "*=" | "/=" | "%="
+EQ_OP.3:           "==" | "!="
+CMP_OP.3:          "<=" | ">=" | "<" | ">"
+ADD_OP:            "+" | "-"
+MUL_OP:            "*" | "/" | "%"
+PUBLIC:            "!"
+NULLABLE:          "?"
+UNARY_OP:          "-" | "!"
+
+// ── TERMINALS: IDENTIFIERS & LITERALS ─────────────────────────
+
+IDENTIFIER: /[a-z_][a-zA-Z0-9_]*/
+TYPE_NAME:  /[A-Z][a-zA-Z0-9_]*/
+
+INT_LIT:    /[0-9][0-9_]*/
+FLOAT_LIT:  /[0-9][0-9_]*\.[0-9][0-9_]*/
+
+STRING_LIT: /\"([^"\\]|\\.)*\"/
+
+// ── WHITESPACE & COMMENTS ─────────────────────────────────────
+
+_NL: /[\n\r;]+/
+
+%ignore /[ \t]+/
+%ignore /#[^\n]*/
+%ignore /\"\"\"[\s\S]*?\"\"\"/
