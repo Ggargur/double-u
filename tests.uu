@@ -1,0 +1,73 @@
+entity Vector {
+    x!: float
+    y!: float
+    z!: float
+
+    fn squared_magnitude() -> float {
+        x * x + y * y + z * z
+    }
+
+    fn magnitude() -> float {
+        sqrt(squared_magnitude())
+    }
+
+    fn dot(other: Vector) -> float {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    } 
+
+    fn normalized() -> Vector {
+        const mag = magnitude()
+        Vector(x / mag, y / mag, z / mag)
+    }
+
+    fn add!(other: Vector) -> Vector {
+        Vector(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
+
+    fn sub!(other: Vector) -> Vector {
+        Vector(self.x - other.x, self.y - other.y, self.z - other.z)
+    }
+
+    fn mul!(scalar: float) -> Vector {
+        Vector(self.x * scalar, self.y * scalar, self.z * scalar)
+    }
+}
+
+entity Point = Vector
+
+entity Collider {
+    radius!: Vector
+
+    fn is_hit(other: Collider) -> bool {
+        (this.radius - other.radius).squared_magnitude() <= ((self.radius + other.radius) * (self.radius + other.radius))
+    }
+}
+
+entity Particle {
+    position: Point
+    velocity: Vector
+    acceleration: Vector
+    mass: float
+
+    mut fn apply_impulse(impulse: Vector) -> unit {
+        velocity = velocity + Vector(impulse.x / mass, impulse.y / mass, impulse.z / mass)
+    }
+
+    fn on_hit(other: Particle) -> unit {
+        let relative_velocity = other.velocity - self.velocity
+        const normal = velocity.normalized()
+        let velocity_along_normal = relative_velocity.dot(normal)
+
+        const restitution = 1
+        const impulse_magnitude = (-(1 + restitution) * velocity_along_normal) / ((1 / self.mass) + (1 / other.mass))
+
+        const impulse = impulse_magnitude * normal
+        
+        apply_impulse(impulse * -1)
+        other.apply_impulse(impulse)
+    } 
+}
+
+fn main!() -> int {
+    
+}
