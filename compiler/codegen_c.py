@@ -4,7 +4,7 @@ IR -> C code generator.
 
 from __future__ import annotations
 
-from ir import (
+from .ir import (
     IRProgram,
     IRFunction,
     IRStructType,

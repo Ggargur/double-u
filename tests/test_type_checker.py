@@ -5,8 +5,8 @@ Run with: python test_type_checker.py
 
 import sys
 
-from parser import parse
-from type_checker import check_program, TypeCheckError
+from compiler.parser import parse
+from compiler.type_checker import check_program, TypeCheckError
 
 
 _failures = 0

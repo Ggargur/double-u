@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from parser import (
+from .parser import (
     Program,
     EntityDecl,
     EntityAlias,
@@ -38,7 +38,7 @@ from parser import (
     SelfType,
     WildcardType,
 )
-from semantic import build_module_symbols, SemanticError
+from .semantic import build_module_symbols, SemanticError
 
 
 BUILTIN_TYPES = {"int", "float", "bool", "string", "unit"}

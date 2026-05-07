@@ -5,8 +5,8 @@ Run with: python test_runtime.py
 
 import sys
 
-from parser import parse
-from runtime import run_program, RuntimeError
+from compiler.parser import parse
+from compiler.runtime import run_program, RuntimeError
 
 
 _failures = 0

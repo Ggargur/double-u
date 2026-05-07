@@ -4,7 +4,7 @@ Run with: python test_parser.py
 """
 
 import sys
-from parser import parse, parse_tree, Program, FunctionDecl, EntityDecl, Binding
+from compiler.parser import parse, parse_tree, Program, FunctionDecl, EntityDecl, Binding
 
 _failures = 0
 

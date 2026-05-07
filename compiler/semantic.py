@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from parser import (
+from .parser import (
     Program,
     ImportStmt,
     EntityDecl,

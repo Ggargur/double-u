@@ -12,7 +12,7 @@ Key features:
 
 from __future__ import annotations
 
-from parser import (
+from .parser import (
     Program,
     FunctionDecl,
     EntityDecl,
@@ -55,7 +55,7 @@ from parser import (
     ListLit,
     MapLit,
 )
-from ir import (
+from .ir import (
     IRProgram,
     IRFunction,
     IRStructType,

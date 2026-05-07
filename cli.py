@@ -10,16 +10,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from parser import parse
-from semantic import resolve_program
-from type_checker import check_program
-from runtime import run_program
-from lowering import lower_program
-from codegen_c import emit_c_program
+_ROOT = str(Path(__file__).parent.resolve())
+
+from compiler.parser import parse
+from compiler.semantic import resolve_program
+from compiler.type_checker import check_program
+from compiler.runtime import run_program
+from compiler.lowering import lower_program
+from compiler.codegen_c import emit_c_program
 
 
 def _load_program(path: Path):
@@ -68,15 +71,16 @@ def cmd_compile(path: Path, output: str | None, emit_c_only: bool, cc: str) -> i
 
 def cmd_test() -> int:
     tests = [
-        "test_parser.py",
-        "test_semantic.py",
-        "test_type_checker.py",
-        "test_runtime.py",
-        "test_codegen_c.py",
-        "test_cli.py",
+        "tests/test_parser.py",
+        "tests/test_semantic.py",
+        "tests/test_type_checker.py",
+        "tests/test_runtime.py",
+        "tests/test_codegen_c.py",
+        "tests/test_cli.py",
     ]
+    env = {**os.environ, "PYTHONPATH": _ROOT}
     for test in tests:
-        rc = subprocess.call([sys.executable, test])
+        rc = subprocess.call([sys.executable, test], env=env)
         if rc != 0:
             return rc
     print("All tests passed.")

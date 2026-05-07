@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from parser import (
+from .parser import (
     Program,
     FunctionDecl,
     Binding,
@@ -48,8 +48,8 @@ from parser import (
     NominalPattern,
     StructuralPattern,
 )
-from semantic import resolve_program, SemanticError
-from type_checker import check_program, TypeCheckError
+from .semantic import resolve_program, SemanticError
+from .type_checker import check_program, TypeCheckError
 
 
 class RuntimeError(Exception):

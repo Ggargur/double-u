@@ -5,8 +5,8 @@ Run with: python test_semantic.py
 
 import sys
 
-from parser import parse
-from semantic import resolve_program, SemanticError
+from compiler.parser import parse
+from compiler.semantic import resolve_program, SemanticError
 
 
 _failures = 0

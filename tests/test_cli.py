@@ -59,7 +59,7 @@ def main():
             )
 
         py = sys.executable
-        cli = os.path.join(os.path.dirname(__file__), "cli.py")
+        cli = os.path.join(os.path.dirname(__file__), "..", "cli.py")
 
         section("CLI commands")
         check_ok("build", [py, cli, "build", path], "Build succeeded")

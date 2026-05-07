@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import sys
 
-from parser import parse
-from lowering import lower_program, LoweringError
-from codegen_c import emit_c_program
+from compiler.parser import parse
+from compiler.lowering import lower_program, LoweringError
+from compiler.codegen_c import emit_c_program
 
 
 _failures = 0
