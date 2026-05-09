@@ -12,11 +12,14 @@ from .parser import (
     ImportStmt,
     EntityDecl,
     EntityAlias,
+    ComponentDecl,
+    FieldDecl,
     CapabilityDecl,
     AttributeDecl,
     ExceptionDecl,
     FunctionDecl,
     Binding,
+    TypeRef,
 )
 
 
@@ -36,6 +39,8 @@ def _decl_symbol(decl: object) -> Symbol | None:
         return Symbol(decl.name, "entity", decl)
     if isinstance(decl, EntityAlias):
         return Symbol(decl.name, "entity-alias", decl)
+    if isinstance(decl, ComponentDecl):
+        return Symbol(decl.name, "component", decl)
     if isinstance(decl, CapabilityDecl):
         return Symbol(decl.name, "capability", decl)
     if isinstance(decl, AttributeDecl):
@@ -87,5 +92,31 @@ def build_module_symbols(program: Program) -> dict[str, Symbol]:
     return symbols
 
 
+def _build_component_entity_map(program: Program, symbols: dict) -> dict[str, str]:
+    component_names = {name for name, sym in symbols.items() if sym.kind == "component"}
+    component_to_entity: dict[str, str] = {}
+    errors: list[str] = []
+
+    for decl in program.decls:
+        if isinstance(decl, EntityDecl):
+            for member in decl.members:
+                if isinstance(member, FieldDecl):
+                    field_type = getattr(member.type, "name", None)
+                    if field_type in component_names:
+                        if field_type in component_to_entity:
+                            errors.append(
+                                f"Component '{field_type}' is used by multiple entities "
+                                f"('{component_to_entity[field_type]}' and '{decl.name}'). "
+                                "Each component may be used by at most one entity."
+                            )
+                        else:
+                            component_to_entity[field_type] = decl.name
+
+    if errors:
+        raise SemanticError("\n".join(errors))
+    return component_to_entity
+
+
 def resolve_program(program: Program) -> None:
-    build_module_symbols(program)
+    symbols = build_module_symbols(program)
+    program.component_to_entity = _build_component_entity_map(program, symbols)

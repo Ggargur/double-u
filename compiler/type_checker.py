@@ -14,6 +14,7 @@ from .parser import (
     Program,
     EntityDecl,
     EntityAlias,
+    ComponentDecl,
     FieldDecl,
     MethodDecl,
     ConstructorDecl,
@@ -65,7 +66,7 @@ def _dedupe_generic_names(params: list[GenericParam], where: str, errors: list[s
 
 
 def _is_type_symbol(kind: str) -> bool:
-    return kind in {"entity", "entity-alias", "capability", "exception"}
+    return kind in {"entity", "entity-alias", "capability", "exception", "component"}
 
 
 def _check_type_ref(name: str, generic_scope: set[str], module_symbols: dict, where: str, errors: list[str]) -> None:
@@ -212,6 +213,18 @@ def check_program(program: Program) -> None:
                     _check_where_clause(member.where_, f"method '{decl.name}.{member.name}'", method_scope, module_symbols, errors)
                 elif isinstance(member, ConstructorDecl):
                     _check_params(member.params, f"constructor '{decl.name}'", entity_scope, module_symbols, errors, allow_self=True)
+
+        elif isinstance(decl, ComponentDecl):
+            comp_scope = _check_generic_params(decl.generics, f"component '{decl.name}'", set(), module_symbols, errors)
+            for member in decl.members:
+                if isinstance(member, FieldDecl):
+                    _check_type(member.type, _TypeContext(f"field '{decl.name}.{member.name}'", allow_self=True), comp_scope, module_symbols, errors)
+                elif isinstance(member, MethodDecl):
+                    method_scope = _check_generic_params(member.generics, f"method '{decl.name}.{member.name}'", comp_scope, module_symbols, errors)
+                    _check_params(member.params, f"method '{decl.name}.{member.name}'", method_scope, module_symbols, errors, allow_self=True)
+                    if member.ret is not None:
+                        _check_type(member.ret, _TypeContext(f"method '{decl.name}.{member.name}' return", allow_self=True), method_scope, module_symbols, errors)
+                    _check_where_clause(member.where_, f"method '{decl.name}.{member.name}'", method_scope, module_symbols, errors)
 
         elif isinstance(decl, EntityAlias):
             alias_scope = _check_generic_params(decl.generics, f"entity alias '{decl.name}'", set(), module_symbols, errors)

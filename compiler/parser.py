@@ -33,8 +33,10 @@ class Node:
 
 # Programs & imports
 class Program(Node):
-    __slots__ = ("imports", "decls")
-    def __init__(self, imports, decls): self.imports = imports; self.decls = decls
+    __slots__ = ("imports", "decls", "component_to_entity")
+    def __init__(self, imports, decls):
+        self.imports = imports; self.decls = decls
+        self.component_to_entity: dict = {}
 
 class ImportStmt(Node):
     __slots__ = ("module", "items")
@@ -54,6 +56,11 @@ class EntityAlias(Node):
     __slots__ = ("name", "generics", "target")
     def __init__(self, name, generics, target):
         self.name = name; self.generics = generics; self.target = target
+
+class ComponentDecl(Node):
+    __slots__ = ("attrs", "name", "generics", "members")
+    def __init__(self, attrs, name, generics, members):
+        self.attrs = attrs; self.name = name; self.generics = generics; self.members = members
 
 class FieldDecl(Node):
     __slots__ = ("attrs", "name", "public", "type", "default")
@@ -269,6 +276,9 @@ class NameExpr(Node):
 class SelfExpr(Node):
     __slots__ = ()
 
+class OurExpr(Node):
+    __slots__ = ()
+
 class ListLit(Node):
     __slots__ = ("elements",)
     def __init__(self, elements): self.elements = elements
@@ -410,6 +420,22 @@ class LangTransformer(Transformer):
 
     def entity_member(self, items):
         return items[0]
+
+    def component_decl(self, items):
+        attrs    = [i for i in items if isinstance(i, Attribute)]
+        tokens   = [i for i in items if isinstance(i, Token)]
+        lists    = [i for i in items if isinstance(i, list)]
+        nodes    = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
+        name     = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
+        generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        members  = [i for i in nodes if isinstance(i, (FieldDecl, MethodDecl))]
+        return ComponentDecl(attrs, name, generics, members)
+
+    def component_member(self, items):
+        return items[0]
+
+    def our_expr(self, items):
+        return OurExpr()
 
     def field_decl(self, items):
         attrs   = [i for i in items if isinstance(i, Attribute)]

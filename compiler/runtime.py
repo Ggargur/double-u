@@ -8,6 +8,10 @@ from dataclasses import dataclass
 
 from .parser import (
     Program,
+    EntityDecl,
+    ComponentDecl,
+    FieldDecl,
+    MethodDecl,
     FunctionDecl,
     Binding,
     Block,
@@ -33,6 +37,7 @@ from .parser import (
     Index,
     NonNull,
     SelfExpr,
+    OurExpr,
     ListLit,
     MapLit,
     MapEntry,
@@ -108,6 +113,10 @@ class Interpreter:
         self.program = program
         self.env = _Env()
         self.functions: dict[str, _FunctionValue] = {}
+        self.entity_decls: dict[str, object] = {}
+        self.entity_fields_map: dict[str, list[str]] = {}
+        self.entity_methods_map: dict[str, dict[str, MethodDecl]] = {}
+        self.component_names: set[str] = set()
         self._install_builtins()
 
     def _install_builtins(self):
@@ -116,6 +125,18 @@ class Interpreter:
         self.env.define("abs", abs)
 
     def load(self):
+        for decl in self.program.decls:
+            if isinstance(decl, (EntityDecl, ComponentDecl)):
+                self.entity_decls[decl.name] = decl
+                self.entity_fields_map[decl.name] = [
+                    m.name for m in decl.members if isinstance(m, FieldDecl)
+                ]
+                self.entity_methods_map[decl.name] = {
+                    m.name: m for m in decl.members if isinstance(m, MethodDecl)
+                }
+                if isinstance(decl, ComponentDecl):
+                    self.component_names.add(decl.name)
+
         for decl in self.program.decls:
             if isinstance(decl, FunctionDecl):
                 self.functions[decl.name] = _FunctionValue(
@@ -216,6 +237,8 @@ class Interpreter:
             return self.env.get(expr.name)
         if isinstance(expr, SelfExpr):
             return self.env.get("self")
+        if isinstance(expr, OurExpr):
+            return self.env.get("our")
         if isinstance(expr, ListLit):
             return [self.eval_expr(e) for e in expr.elements]
         if isinstance(expr, MapLit):
@@ -333,19 +356,103 @@ class Interpreter:
         return self.eval_expr(arm.body)
 
     def _eval_call(self, node: Call):
-        callee = self.eval_expr(node.callee)
+        callee_expr = node.callee
+
+        # obj.method(args) — resolve before evaluating callee as a plain expression
+        if isinstance(callee_expr, FieldAccess):
+            method_name = callee_expr.field
+            obj_expr = callee_expr.obj
+
+            # entity_expr.comp_field.method(args) — component method with 'our' injection
+            if isinstance(obj_expr, FieldAccess):
+                outer_obj = self.eval_expr(obj_expr.obj)
+                comp_field_name = obj_expr.field
+                if isinstance(outer_obj, dict) and "__type__" in outer_obj:
+                    comp_type = self._get_component_field_type(
+                        self.entity_decls.get(outer_obj["__type__"]), comp_field_name
+                    )
+                    if comp_type is not None:
+                        comp_val = outer_obj.get(comp_field_name)
+                        args = [self.eval_expr(a.value if isinstance(a, Argument) else a) for a in node.args]
+                        return self._call_method(comp_val, method_name, args, our=outer_obj)
+
+            obj = self.eval_expr(obj_expr)
+            args = [self.eval_expr(a.value if isinstance(a, Argument) else a) for a in node.args]
+            return self._call_method(obj, method_name, args)
+
         args = [self.eval_expr(a.value if isinstance(a, Argument) else a) for a in node.args]
+
+        # Bare name call — check for implicit self method call first
+        if isinstance(callee_expr, NameExpr):
+            name = callee_expr.name
+            try:
+                self_obj = self.env.get("self")
+                if isinstance(self_obj, dict) and "__type__" in self_obj:
+                    methods = self.entity_methods_map.get(self_obj["__type__"], {})
+                    if name in methods:
+                        our = None
+                        try:
+                            our = self.env.get("our")
+                        except RuntimeError:
+                            pass
+                        return self._call_entity_method(methods[name], self_obj, args, our=our)
+            except RuntimeError:
+                pass
+
+        callee = self.eval_expr(callee_expr)
         if isinstance(callee, _FunctionValue):
             return self._call_function(callee, args)
         if callable(callee):
             return callee(*args)
         raise RuntimeError("Attempted to call a non-callable value.")
 
+    def _get_component_field_type(self, entity_decl, field_name: str):
+        if entity_decl is None:
+            return None
+        for member in entity_decl.members:
+            if isinstance(member, FieldDecl) and member.name == field_name:
+                t = getattr(member.type, "name", None)
+                if t in self.component_names:
+                    return t
+        return None
+
+    def _call_method(self, obj, method_name: str, args: list, our=None):
+        if isinstance(obj, dict) and "__type__" in obj:
+            type_name = obj["__type__"]
+            methods = self.entity_methods_map.get(type_name, {})
+            method_decl = methods.get(method_name)
+            if method_decl:
+                return self._call_entity_method(method_decl, obj, args, our=our)
+        if isinstance(obj, dict) and method_name in obj:
+            val = obj[method_name]
+            if callable(val):
+                return val(*args)
+        if hasattr(obj, method_name) and callable(getattr(obj, method_name)):
+            return getattr(obj, method_name)(*args)
+        raise RuntimeError(f"Method '{method_name}' not found on {type(obj).__name__}.")
+
+    def _call_entity_method(self, method_decl: MethodDecl, self_obj, args: list, our=None):
+        self.env.push()
+        try:
+            self.env.define("self", self_obj)
+            if our is not None:
+                self.env.define("our", our)
+            for param, arg_value in zip(method_decl.params or [], args):
+                self.env.define(param.name, arg_value)
+            try:
+                return self.eval_block(method_decl.body)
+            except _ReturnSignal as ret:
+                return ret.value
+        finally:
+            self.env.pop()
+
     def _eval_constructor_call(self, node: ConstructorCall):
         values = [self.eval_expr(a.value if isinstance(a, Argument) else a) for a in node.args]
+        field_names = self.entity_fields_map.get(node.type_name, [])
         payload = {"__type__": node.type_name}
         for idx, value in enumerate(values):
-            payload[f"arg{idx}"] = value
+            key = field_names[idx] if idx < len(field_names) else f"arg{idx}"
+            payload[key] = value
         return payload
 
     def _assign_lvalue(self, assign: Assignment, value):
@@ -393,6 +500,17 @@ class Interpreter:
         if node.op == "??":
             return left if left is not None else self.eval_expr(node.right)
         right = self.eval_expr(node.right)
+        # Entity operator dispatch
+        _op_method = {"+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod"}.get(node.op)
+        if _op_method:
+            if isinstance(left, dict) and "__type__" in left:
+                methods = self.entity_methods_map.get(left["__type__"], {})
+                if _op_method in methods:
+                    return self._call_entity_method(methods[_op_method], left, [right])
+            if isinstance(right, dict) and "__type__" in right:
+                methods = self.entity_methods_map.get(right["__type__"], {})
+                if _op_method in methods:
+                    return self._call_entity_method(methods[_op_method], right, [left])
         if node.op == "+":
             return left + right
         if node.op == "-":

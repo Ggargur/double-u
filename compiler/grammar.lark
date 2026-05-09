@@ -16,6 +16,7 @@ qualified_name: IDENTIFIER ("." IDENTIFIER)*
 
 top_level_decl: entity_decl
               | entity_alias
+              | component_decl
               | capability_decl
               | extend_decl
               | attribute_decl
@@ -29,6 +30,11 @@ entity_decl:  attribute_line* ENTITY TYPE_NAME generic_params? "{" _NL* entity_m
 entity_alias: ENTITY TYPE_NAME generic_params? "=" type _NL
 
 entity_member: (field_decl | method_decl | constructor_decl) _NL*
+
+// ── COMPONENTS ────────────────────────────────────────────────
+
+component_decl: attribute_line* COMPONENT TYPE_NAME generic_params? "{" _NL* component_member* "}"
+component_member: (field_decl | method_decl) _NL*
 
 field_decl:      attribute_line* IDENTIFIER PUBLIC? ":" type ("=" expression)? _NL
 method_decl:     attribute_line* MUT? FN IDENTIFIER PUBLIC? generic_params? "(" params? ")" (ARROW type)? _NL* where_clause? block
@@ -166,6 +172,7 @@ postfix_op: "." IDENTIFIER         -> field_access
 
 primary_expr: literal
             | SELF_EXPR            -> self_expr
+            | OUR                  -> our_expr
             | "(" expression ")"   -> grouped
             | list_literal
             | map_literal
@@ -244,6 +251,8 @@ OR.2:          "or"
 AND.2:         "and"
 SELF_EXPR.2:   "self"
 SELF_TYPE.2:   "Self"
+COMPONENT.2:   "component"
+OUR.2:         "our"
 PRIMITIVE_KW.2: "int" | "float" | "bool" | "string" | "unit"
 BOOL_LIT.2:    "true" | "false"
 NULL_LIT.2:    "null"

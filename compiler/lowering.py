@@ -17,6 +17,7 @@ from .parser import (
     FunctionDecl,
     EntityDecl,
     EntityAlias,
+    ComponentDecl,
     FieldDecl,
     MethodDecl,
     Binding,
@@ -34,6 +35,7 @@ from .parser import (
     NullLit,
     NameExpr,
     SelfExpr,
+    OurExpr,
     BinOp,
     UnaryOp,
     Call,
@@ -186,8 +188,12 @@ class _LowerCtx:
         entity_field_types: dict[str, dict[str, str]],
         entity_method_rets: dict[str, dict[str, str]],
         type_aliases: dict[str, str] | None = None,
+        component_names: set[str] | None = None,
+        component_to_entity: dict[str, str] | None = None,
         current_entity: str | None = None,
         current_method_mut: bool = False,
+        current_is_component: bool = False,
+        current_entity_for_component: str | None = None,
     ):
         self.type_env = type_env
         self.entity_fields = entity_fields
@@ -195,8 +201,12 @@ class _LowerCtx:
         self.entity_field_types = entity_field_types   # entity → {field → lang_type}
         self.entity_method_rets = entity_method_rets   # entity → {method → lang_type_ret}
         self.type_aliases: dict[str, str] = type_aliases or {}
+        self.component_names: set[str] = component_names or set()
+        self.component_to_entity: dict[str, str] = component_to_entity or {}
         self.current_entity = current_entity
         self.current_method_mut = current_method_mut
+        self.current_is_component = current_is_component
+        self.current_entity_for_component = current_entity_for_component
         self._tmp_counter = 0
 
     def canonical(self, lang_type: str) -> str:
@@ -230,6 +240,9 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
 
     if isinstance(expr, SelfExpr):
         return ctx.current_entity
+
+    if isinstance(expr, OurExpr):
+        return ctx.current_entity_for_component
 
     if isinstance(expr, (FieldAccess, OptionalChain)):
         obj_type = _resolve_expr_type(expr.obj, ctx)
@@ -285,7 +298,9 @@ def _is_type_name(name: str) -> bool:
 
 
 def _is_mut_receiver(expr, ctx: _LowerCtx) -> bool:
-    """True only when expr is `self` inside a mut method (pointer receiver)."""
+    """True when expr is a pointer receiver (mut self, or our which is always a pointer)."""
+    if isinstance(expr, OurExpr):
+        return True  # our is always EntityName* in component methods
     return isinstance(expr, SelfExpr) and ctx.current_method_mut
 
 
@@ -326,6 +341,9 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
 
     if isinstance(expr, SelfExpr):
         return IRVar("self")
+
+    if isinstance(expr, OurExpr):
+        return IRVar("our")
 
     if isinstance(expr, BinOp):
         method     = OPERATOR_METHODS.get(expr.op)
@@ -405,6 +423,22 @@ def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
         method_name = callee.field
 
         obj_lang_type = _resolve_expr_type(callee.obj, ctx)
+
+        # Component method call: entity_expr.comp_field.method(args)
+        if obj_lang_type and obj_lang_type in ctx.component_names:
+            method_decl = ctx.entity_methods.get(obj_lang_type, {}).get(method_name)
+            if method_decl:
+                fn_name = f"{obj_lang_type}__{method_name}"
+                self_arg = _self_arg_for_call(obj_ir, callee.obj, method_decl, ctx)
+                # Build 'our': &entity_expr (the entity that owns this component)
+                if isinstance(callee.obj, FieldAccess):
+                    entity_expr = callee.obj.obj
+                    entity_ir = lower_expr(entity_expr, ctx, preamble)
+                    our_ir = IRUnaryOp("&", entity_ir)
+                else:
+                    our_ir = IRVar("our")  # already inside component method
+                return IRCall(fn_name, [self_arg, our_ir] + args_ir)
+
         if obj_lang_type and obj_lang_type in ctx.entity_methods:
             method_decl = ctx.entity_methods[obj_lang_type].get(method_name)
             if method_decl:
@@ -546,6 +580,8 @@ def lower_stmt(stmt, ctx: _LowerCtx, out: list[IRStmt]):
                     out.append(IRPtrFieldAssign("self", target.field, val))
                 else:
                     out.append(IRFieldAssign("self", target.field, val))
+            elif isinstance(obj, OurExpr):
+                out.append(IRPtrFieldAssign("our", target.field, val))
             elif isinstance(obj, NameExpr):
                 out.append(IRFieldAssign(obj.name, target.field, val))
             else:
@@ -755,6 +791,8 @@ def _lower_method(method: MethodDecl, entity_name: str, ctx: _LowerCtx, out_fns:
         entity_field_types=ctx.entity_field_types,
         entity_method_rets=ctx.entity_method_rets,
         type_aliases=ctx.type_aliases,
+        component_names=ctx.component_names,
+        component_to_entity=ctx.component_to_entity,
         current_entity=entity_name,
         current_method_mut=method.mut,
     )
@@ -786,6 +824,83 @@ def _lower_method(method: MethodDecl, entity_name: str, ctx: _LowerCtx, out_fns:
     ))
 
 
+# ── Component lowering ────────────────────────────────────────────────────────
+
+def _lower_component(decl: ComponentDecl, ctx: _LowerCtx, out_struct: list, out_fns: list):
+    name = decl.name
+    entity_name = ctx.component_to_entity.get(name)
+
+    fields: list[IRStructField] = []
+    field_names: list[str] = []
+    for member in decl.members:
+        if isinstance(member, FieldDecl):
+            c_type = _type_to_c(member.type)
+            fields.append(IRStructField(member.name, c_type))
+            field_names.append(member.name)
+
+    out_struct.append(IRStructType(name, fields))
+    ctx.entity_fields[name] = field_names
+
+    for member in decl.members:
+        if isinstance(member, MethodDecl):
+            _lower_component_method(member, name, entity_name, ctx, out_fns)
+
+
+def _lower_component_method(
+    method: MethodDecl,
+    comp_name: str,
+    entity_name: str | None,
+    ctx: _LowerCtx,
+    out_fns: list,
+):
+    method_ctx = _LowerCtx(
+        type_env=_TypeEnv(),
+        entity_fields=ctx.entity_fields,
+        entity_methods=ctx.entity_methods,
+        entity_field_types=ctx.entity_field_types,
+        entity_method_rets=ctx.entity_method_rets,
+        type_aliases=ctx.type_aliases,
+        component_names=ctx.component_names,
+        component_to_entity=ctx.component_to_entity,
+        current_entity=comp_name,
+        current_method_mut=method.mut,
+        current_is_component=True,
+        current_entity_for_component=entity_name,
+    )
+    method_ctx.type_env.define("self", comp_name)
+    if entity_name:
+        method_ctx.type_env.define("our", entity_name)
+
+    if method.mut:
+        self_param: tuple[str, str] = ("self", f"{comp_name}*")
+    else:
+        self_param = ("self", comp_name)
+
+    our_c_type = f"{entity_name}*" if entity_name else "void*"
+    our_param: tuple[str, str] = ("our", our_c_type)
+
+    extra_params = [
+        (p.name, _type_to_c(p.type)) for p in (method.params or [])
+    ]
+    params = [self_param, our_param] + extra_params
+
+    for p in (method.params or []):
+        method_ctx.type_env.define(p.name, _type_to_name(p.type))
+
+    ret_type = _type_to_c(method.ret) if method.ret else "void"
+    stmts: list[IRStmt] = []
+    _lower_block(method.body, method_ctx, stmts)
+    if ret_type == "void":
+        _fix_void_tail(stmts)
+
+    out_fns.append(IRFunction(
+        name=f"{comp_name}__{method.name}",
+        params=params,
+        ret_type=ret_type,
+        stmts=stmts,
+    ))
+
+
 # ── Top-level lowering ────────────────────────────────────────────────────────
 
 def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
@@ -796,6 +911,8 @@ def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
         entity_field_types=ctx.entity_field_types,
         entity_method_rets=ctx.entity_method_rets,
         type_aliases=ctx.type_aliases,
+        component_names=ctx.component_names,
+        component_to_entity=ctx.component_to_entity,
         current_entity=None,
     )
     params: list[tuple[str, str]] = []
@@ -813,16 +930,18 @@ def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
 
 
 def lower_program(program: Program) -> IRProgram:
-    # ── First pass: collect entity metadata ───────────────────────────────────
+    # ── First pass: collect entity/component metadata ─────────────────────────
     entity_fields: dict[str, list[str]] = {}
     entity_methods: dict[str, dict[str, MethodDecl]] = {}
     entity_field_types: dict[str, dict[str, str]] = {}
     entity_method_rets: dict[str, dict[str, str]] = {}
 
     lang_type_aliases: dict[str, str] = {}   # alias → canonical (e.g. "Point" → "Vector")
+    component_names: set[str] = set()
+    component_to_entity: dict[str, str] = getattr(program, "component_to_entity", {})
 
     for decl in program.decls:
-        if isinstance(decl, EntityDecl):
+        if isinstance(decl, (EntityDecl, ComponentDecl)):
             entity_fields[decl.name] = [
                 m.name for m in decl.members if isinstance(m, FieldDecl)
             ]
@@ -837,6 +956,8 @@ def lower_program(program: Program) -> IRProgram:
                 m.name: _type_to_name(m.ret) if m.ret else "unit"
                 for m in decl.members if isinstance(m, MethodDecl)
             }
+            if isinstance(decl, ComponentDecl):
+                component_names.add(decl.name)
         elif isinstance(decl, EntityAlias):
             target_name = getattr(decl.target, "name", None)
             if target_name:
@@ -849,6 +970,8 @@ def lower_program(program: Program) -> IRProgram:
         entity_field_types=entity_field_types,
         entity_method_rets=entity_method_rets,
         type_aliases=lang_type_aliases,
+        component_names=component_names,
+        component_to_entity=component_to_entity,
     )
 
     # ── Second pass: emit IR ──────────────────────────────────────────────────
@@ -861,6 +984,9 @@ def lower_program(program: Program) -> IRProgram:
     for decl in program.decls:
         if isinstance(decl, EntityDecl):
             _lower_entity(decl, ctx, struct_types, fns_from_entities)
+
+        elif isinstance(decl, ComponentDecl):
+            _lower_component(decl, ctx, struct_types, fns_from_entities)
 
         elif isinstance(decl, EntityAlias):
             target_c = _type_to_c(decl.target)

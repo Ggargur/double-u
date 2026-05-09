@@ -275,6 +275,28 @@ def _collect_list_types(ir_prog: IRProgram) -> set[str]:
     return found
 
 
+# ── Struct ordering ───────────────────────────────────────────────────────────
+
+def _topo_sort_structs(structs: list[IRStructType]) -> list[IRStructType]:
+    """Return structs in dependency order: depended-upon structs come first."""
+    name_to_struct = {s.name: s for s in structs}
+    visited: set[str] = set()
+    result: list[IRStructType] = []
+
+    def visit(name: str):
+        if name in visited or name not in name_to_struct:
+            return
+        visited.add(name)
+        for f in name_to_struct[name].fields:
+            field_base = f.c_type.rstrip("*").strip()
+            visit(field_base)
+        result.append(name_to_struct[name])
+
+    for s in structs:
+        visit(s.name)
+    return result
+
+
 # ── Program emitter ───────────────────────────────────────────────────────────
 
 def emit_c_program(ir_prog: IRProgram) -> str:
@@ -295,8 +317,8 @@ def emit_c_program(ir_prog: IRProgram) -> str:
     if any(a.target not in local_struct_names for a in ir_prog.type_aliases):
         out.append("")
 
-    # Struct declarations + inline typedefs
-    for s in ir_prog.struct_types:
+    # Struct declarations + inline typedefs (dependency order)
+    for s in _topo_sort_structs(ir_prog.struct_types):
         _emit_struct(s, out)
         if s.name in alias_by_target:
             a = alias_by_target[s.name]
