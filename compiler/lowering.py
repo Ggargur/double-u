@@ -82,6 +82,8 @@ from .ir import (
     IRIndex,
     IRNew,
     IRCast,
+    IRTernary,
+    IRCharBuf,
     IRExpr,
     IRStmt,
 )
@@ -208,6 +210,7 @@ class _LowerCtx:
         self.current_is_component = current_is_component
         self.current_entity_for_component = current_entity_for_component
         self._tmp_counter = 0
+        self.extra_includes: set[str] = set()  # shared across child contexts via _child()
 
     def canonical(self, lang_type: str) -> str:
         """Resolve a type-alias chain to the root entity that owns the methods."""
@@ -220,6 +223,22 @@ class _LowerCtx:
     def fresh(self, prefix: str = "_t") -> str:
         self._tmp_counter += 1
         return f"{prefix}{self._tmp_counter}"
+
+    def child(self, **kwargs) -> "_LowerCtx":
+        """Create a child context sharing the same extra_includes set."""
+        c = _LowerCtx(
+            type_env=_TypeEnv(),
+            entity_fields=self.entity_fields,
+            entity_methods=self.entity_methods,
+            entity_field_types=self.entity_field_types,
+            entity_method_rets=self.entity_method_rets,
+            type_aliases=self.type_aliases,
+            component_names=self.component_names,
+            component_to_entity=self.component_to_entity,
+            **kwargs,
+        )
+        c.extra_includes = self.extra_includes
+        return c
 
 
 # ── Expression type resolution ────────────────────────────────────────────────
@@ -271,6 +290,9 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
         return None
 
     if isinstance(expr, BinOp):
+        # Comparison, equality, and logical operators always yield bool.
+        if expr.op in ("==", "!=", "<", ">", "<=", ">=", "and", "or"):
+            return "bool"
         left_type  = _resolve_expr_type(expr.left,  ctx)
         right_type = _resolve_expr_type(expr.right, ctx)
         method = OPERATOR_METHODS.get(expr.op)
@@ -304,15 +326,42 @@ def _is_mut_receiver(expr, ctx: _LowerCtx) -> bool:
     return isinstance(expr, SelfExpr) and ctx.current_method_mut
 
 
-# ── String literal helper ─────────────────────────────────────────────────────
+# ── String literal helpers ────────────────────────────────────────────────────
 
-def _string_lit_to_plain(node: StringLit) -> str:
-    out = ""
+def _fmt_spec(lang_type: str | None) -> str:
+    if lang_type == "float":  return "%f"
+    if lang_type == "bool":   return "%s"
+    if lang_type == "string": return "%s"
+    return "%ld"
+
+
+def _lower_string_lit(node: StringLit, ctx: _LowerCtx, out_preamble: list) -> IRExpr:
+    has_interp = any(isinstance(p, tuple) for p in node.parts)
+    if not has_interp:
+        return IRConst("".join(str(p) for p in node.parts))
+
+    ctx.extra_includes.add("<stdio.h>")
+
+    fmt_parts: list[str] = []
+    args: list[IRExpr] = []
     for part in node.parts:
-        if isinstance(part, tuple):
-            raise LoweringError("String interpolation is not supported by C backend yet.")
-        out += str(part)
-    return out
+        if isinstance(part, tuple) and part[0] == "interp":
+            expr_node = part[1]
+            expr_ir   = lower_expr(expr_node, ctx, out_preamble)
+            expr_type = _resolve_expr_type(expr_node, ctx)
+            if expr_type == "bool":
+                expr_ir = IRTernary(expr_ir, IRConst("true"), IRConst("false"))
+            fmt_parts.append(_fmt_spec(expr_type))
+            args.append(expr_ir)
+        else:
+            fmt_parts.append(str(part).replace("%", "%%"))
+
+    buf = ctx.fresh("_s")
+    out_preamble.append(IRCharBuf(buf, 512))
+    out_preamble.append(IRExprStmt(
+        IRCall("snprintf", [IRVar(buf), IRConst(512), IRConst("".join(fmt_parts))] + args)
+    ))
+    return IRVar(buf)
 
 
 # ── Expression lowering ───────────────────────────────────────────────────────
@@ -327,7 +376,7 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
     if isinstance(expr, NullLit):
         return IRConst(None)
     if isinstance(expr, StringLit):
-        return IRConst(_string_lit_to_plain(expr))
+        return _lower_string_lit(expr, ctx, out_preamble)
 
     if isinstance(expr, NameExpr):
         name = expr.name
@@ -784,15 +833,7 @@ def _lower_entity(decl: EntityDecl, ctx: _LowerCtx, out_struct: list, out_fns: l
 
 
 def _lower_method(method: MethodDecl, entity_name: str, ctx: _LowerCtx, out_fns: list):
-    method_ctx = _LowerCtx(
-        type_env=_TypeEnv(),
-        entity_fields=ctx.entity_fields,
-        entity_methods=ctx.entity_methods,
-        entity_field_types=ctx.entity_field_types,
-        entity_method_rets=ctx.entity_method_rets,
-        type_aliases=ctx.type_aliases,
-        component_names=ctx.component_names,
-        component_to_entity=ctx.component_to_entity,
+    method_ctx = ctx.child(
         current_entity=entity_name,
         current_method_mut=method.mut,
     )
@@ -853,15 +894,7 @@ def _lower_component_method(
     ctx: _LowerCtx,
     out_fns: list,
 ):
-    method_ctx = _LowerCtx(
-        type_env=_TypeEnv(),
-        entity_fields=ctx.entity_fields,
-        entity_methods=ctx.entity_methods,
-        entity_field_types=ctx.entity_field_types,
-        entity_method_rets=ctx.entity_method_rets,
-        type_aliases=ctx.type_aliases,
-        component_names=ctx.component_names,
-        component_to_entity=ctx.component_to_entity,
+    method_ctx = ctx.child(
         current_entity=comp_name,
         current_method_mut=method.mut,
         current_is_component=True,
@@ -904,17 +937,7 @@ def _lower_component_method(
 # ── Top-level lowering ────────────────────────────────────────────────────────
 
 def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
-    fn_ctx = _LowerCtx(
-        type_env=_TypeEnv(),
-        entity_fields=ctx.entity_fields,
-        entity_methods=ctx.entity_methods,
-        entity_field_types=ctx.entity_field_types,
-        entity_method_rets=ctx.entity_method_rets,
-        type_aliases=ctx.type_aliases,
-        component_names=ctx.component_names,
-        component_to_entity=ctx.component_to_entity,
-        current_entity=None,
-    )
+    fn_ctx = ctx.child()
     params: list[tuple[str, str]] = []
     for p in (fn.params or []):
         c_type = _type_to_c(p.type)
@@ -927,6 +950,19 @@ def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
     if ret_type == "void":
         _fix_void_tail(stmts)
     return IRFunction(name=fn.name, params=params, ret_type=ret_type, stmts=stmts)
+
+
+def _extract_c_includes(program: Program) -> list[str]:
+    """Collect #include directives from `import c.X` statements."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for imp in program.imports:
+        if imp.module and imp.module[0] == "c" and len(imp.module) >= 2:
+            header = f"<{imp.module[1]}.h>"
+            if header not in seen:
+                seen.add(header)
+                result.append(header)
+    return result
 
 
 def lower_program(program: Program) -> IRProgram:
@@ -1016,9 +1052,21 @@ def lower_program(program: Program) -> IRProgram:
         elif isinstance(decl, FunctionDecl):
             functions_out.append(lower_function(decl, ctx))
 
+    seen_includes: set[str] = set()
+    c_includes: list[str] = []
+    for h in _extract_c_includes(program):
+        if h not in seen_includes:
+            seen_includes.add(h)
+            c_includes.append(h)
+    for h in sorted(ctx.extra_includes):
+        if h not in seen_includes:
+            seen_includes.add(h)
+            c_includes.append(h)
+
     return IRProgram(
         struct_types=struct_types,
         type_aliases=type_aliases,
         globals=globals_out,
         functions=fns_from_entities + functions_out,
+        c_includes=c_includes,
     )

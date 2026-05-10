@@ -76,6 +76,13 @@ class IRCast(IRExpr):
     value: IRExpr
 
 
+@dataclass
+class IRTernary(IRExpr):
+    cond: IRExpr
+    then_val: IRExpr
+    else_val: IRExpr
+
+
 # ── Statements ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -142,6 +149,13 @@ class IRArrayDecl(IRStmt):
 
 
 @dataclass
+class IRCharBuf(IRStmt):
+    """char name[size]; — stack buffer for snprintf string interpolation."""
+    name: str
+    size: int
+
+
+@dataclass
 class IRReturn(IRStmt):
     value: IRExpr | None
 
@@ -187,3 +201,4 @@ class IRProgram:
     type_aliases: list[IRTypeAlias] = field(default_factory=list)
     globals: list[IRVarDecl] = field(default_factory=list)
     functions: list[IRFunction] = field(default_factory=list)
+    c_includes: list[str] = field(default_factory=list)  # e.g. ["<stdio.h>", "<math.h>"]

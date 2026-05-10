@@ -715,14 +715,16 @@ class LangTransformer(Transformer):
         tail  = None
         for item in items:
             if isinstance(item, Node):
-                # Expression that ended without _NL is the tail
-                # We detect tail as the last item if it's a non-statement expression
                 stmts.append(item)
-        # Heuristic: if the last node is a pure expression (not a statement), it's the tail
         _stmt_types = (Binding, Assignment, IfStmt, ForStmt, MatchStmt,
                        TryStmt, ThrowStmt, EarlyReturn, SpawnStmt, SelectStmt)
         if stmts and not isinstance(stmts[-1], _stmt_types):
             tail = stmts.pop()
+        # Fix Earley ambiguity: "^expr" is parsed as EarlyReturn(None) + expr-as-tail.
+        # When the last stmt is a valueless EarlyReturn and there's a tail, merge them.
+        if stmts and isinstance(stmts[-1], EarlyReturn) and stmts[-1].value is None and tail is not None:
+            stmts[-1] = EarlyReturn(tail)
+            tail = None
         return Block(stmts, tail)
 
     # ── expressions ───────────────────────────────────────────────────────────
@@ -757,7 +759,13 @@ class LangTransformer(Transformer):
         for op in items[1:]:
             if isinstance(op, _FA):  expr = FieldAccess(expr, op.f)
             elif isinstance(op, _OC): expr = OptionalChain(expr, op.f)
-            elif isinstance(op, _CA): expr = Call(expr, op.a)
+            elif isinstance(op, _CA):
+                # Earley ambiguity: `Particle()` parses as Call(NameExpr("Particle")) instead
+                # of constructor_call. Recover by detecting uppercase callees.
+                if isinstance(expr, NameExpr) and expr.name and expr.name[0].isupper():
+                    expr = ConstructorCall(expr.name, None, op.a)
+                else:
+                    expr = Call(expr, op.a)
             elif isinstance(op, _IX): expr = Index(expr, op.i)
             elif isinstance(op, _NN): expr = NonNull(expr)
         return expr
@@ -861,7 +869,7 @@ class LangTransformer(Transformer):
 # ── String interpolation helper ───────────────────────────────────────────────
 
 def _parse_interp(raw: str) -> list:
-    """Split raw string content into text segments and interpolation markers."""
+    """Split raw string content into text segments and pre-parsed interpolation expressions."""
     parts: list = []
     buf = ""
     i = 0
@@ -879,7 +887,7 @@ def _parse_interp(raw: str) -> list:
                     if depth == 0: break
                 j += 1
             if buf: parts.append(buf); buf = ""
-            parts.append(("interp", raw[i + 1:j]))
+            parts.append(("interp", parse_expression(raw[i + 1:j].strip())))
             i = j + 1
         else:
             buf += ch; i += 1
@@ -913,6 +921,12 @@ def parse(source: str) -> Program:
         return _transformer.transform(tree)
     except UnexpectedInput as e:
         raise SyntaxError(_format_syntax_error(source, e)) from e
+
+
+def parse_expression(source: str):
+    """Parse a single expression from raw source code (used for string interpolation)."""
+    prog = parse(f"fn __interp__!() -> unit {{ ^({source}) }}\n")
+    return prog.decls[0].body.stmts[0].value
 
 
 def parse_tree(source: str) -> Tree:

@@ -1,0 +1,5 @@
+import c.stdio
+
+fn println!(s: string) -> unit {
+    puts(s)
+}

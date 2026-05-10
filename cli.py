@@ -20,7 +20,7 @@ _ROOT = str(Path(__file__).parent.resolve())
 from compiler.parser import parse
 from compiler.semantic import resolve_program
 from compiler.type_checker import check_program
-from compiler.runtime import run_program
+from compiler.runtime import run_program, expand_stdlib_imports
 from compiler.lowering import lower_program
 from compiler.codegen_c import emit_c_program
 
@@ -30,10 +30,17 @@ def _load_program(path: Path):
     return parse(source if source.endswith("\n") else source + "\n")
 
 
-def cmd_build(path: Path) -> int:
+def _prepare_program(path: Path):
+    """Parse + expand stdlib + run semantic and type checks."""
     program = _load_program(path)
+    expand_stdlib_imports(program)
     resolve_program(program)
     check_program(program)
+    return program
+
+
+def cmd_build(path: Path) -> int:
+    _prepare_program(path)
     print(f"Build succeeded: {path}")
     return 0
 
@@ -47,9 +54,7 @@ def cmd_run(path: Path, entry: str) -> int:
 
 
 def cmd_compile(path: Path, output: str | None, emit_c_only: bool, cc: str) -> int:
-    program = _load_program(path)
-    resolve_program(program)
-    check_program(program)
+    program = _prepare_program(path)
     ir_prog = lower_program(program)
     c_code = emit_c_program(ir_prog)
 

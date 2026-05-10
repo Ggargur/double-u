@@ -28,6 +28,8 @@ from .ir import (
     IRIndex,
     IRNew,
     IRCast,
+    IRTernary,
+    IRCharBuf,
     IRExpr,
     IRStmt,
 )
@@ -115,6 +117,9 @@ def _emit_expr(expr: IRExpr) -> str:
     if isinstance(expr, IRCast):
         return f"(({expr.c_type}){_emit_expr(expr.value)})"
 
+    if isinstance(expr, IRTernary):
+        return f"({_emit_expr(expr.cond)} ? {_emit_expr(expr.then_val)} : {_emit_expr(expr.else_val)})"
+
     raise CodegenError(f"Unsupported IR expression: {type(expr).__name__}")
 
 
@@ -130,6 +135,10 @@ def _emit_stmt(stmt: IRStmt, out: list[str], indent: str = "    "):
         ct = _c_type(stmt.elem_type)
         items = ", ".join(_emit_expr(e) for e in stmt.elements)
         out.append(f"{indent}{ct} {stmt.name}[] = {{{items}}};")
+        return
+
+    if isinstance(stmt, IRCharBuf):
+        out.append(f"{indent}char {stmt.name}[{stmt.size}];")
         return
 
     if isinstance(stmt, IRAssign):
@@ -301,11 +310,10 @@ def _topo_sort_structs(structs: list[IRStructType]) -> list[IRStructType]:
 
 def emit_c_program(ir_prog: IRProgram) -> str:
     _EMITTED_LIST_TYPES.clear()
-    out: list[str] = [
-        "#include <stdbool.h>",
-        "#include <stdio.h>",
-        "",
-    ]
+    out: list[str] = ["#include <stdbool.h>"]
+    for inc in ir_prog.c_includes:
+        out.append(f"#include {inc}")
+    out.append("")
 
     # Build alias-by-target map so each alias is emitted right after its struct
     alias_by_target: dict[str, IRTypeAlias] = {a.target: a for a in ir_prog.type_aliases}

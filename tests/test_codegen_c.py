@@ -204,11 +204,19 @@ fn describe!(x: int) -> int {
         ],
     )
 
-    section("Unsupported lowering")
-    check_fail(
-        "string interpolation unsupported",
-        'fn main!() -> string { "hi {name}" }\n',
-        "String interpolation is not supported",
+    section("String interpolation")
+    check_ok(
+        "interpolation lowers to snprintf",
+        'fn main!() -> int {\n'
+        '    const name = 42\n'
+        '    const _ = "hi {name}"\n'
+        '    0\n'
+        '}\n',
+        must_contain=[
+            "char _s1[512];",
+            'snprintf(_s1, 512, "hi %ld", name);',
+            "#include <stdio.h>",
+        ],
     )
 
     if _failures:

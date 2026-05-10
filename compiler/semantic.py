@@ -55,6 +55,10 @@ def _decl_symbol(decl: object) -> Symbol | None:
 
 
 def _imported_names(stmt: ImportStmt) -> list[str]:
+    # C library imports (import c.stdio, import c.math, …) are transparent to
+    # the language symbol table — they only affect C include emission.
+    if stmt.module and stmt.module[0] == "c":
+        return []
     if stmt.items:
         names: list[str] = []
         for item in stmt.items:
