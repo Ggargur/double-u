@@ -1,0 +1,36 @@
+import c.stdio
+
+entity Vector {
+    x!: float
+    y!: float
+    fn add!(other: Vector) -> Vector { Vector(self.x + other.x, self.y + other.y) }
+    fn sub!(other: Vector) -> Vector { Vector(self.x - other.x, self.y - other.y) }
+    fn distance!(other: Vector) -> float {
+        const dx = self.x - other.x
+        const dy = self.y - other.y
+        dx * dx + dy * dy
+    }
+}
+
+entity Object {
+    transform!: Transform
+    collider!:  Collider
+}
+
+component Transform {
+    position!: Vector
+}
+
+component Collider {
+    radius!: float
+    fn intersects!(other_radius: float, other_pos: Vector) -> bool {
+        our.transform.position.distance(other_pos) < self.radius + other_radius
+    }
+}
+
+fn main!() -> int {
+    const a = Object(Transform(Vector(0.0, 0.0)), Collider(1.5))
+    const b = Object(Transform(Vector(1.0, 0.0)), Collider(1.0))
+    printf("%d\n", a.collider.intersects(b.collider.radius, b.transform.position))
+    0
+}

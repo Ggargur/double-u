@@ -1,3 +1,5 @@
+import stdio
+
 fn sqrt_iter!(n: float, x: float) -> float {
     const refined = (x + n / x) / 2.0
     if refined == x { ^x }
@@ -92,6 +94,7 @@ fn main!() -> int {
     let p2 = Particle()
     p2.collider = Collider(3, Point(1,5.0000001,1))
 
-    printf("%d", p1.collider.is_hit(p2.collider))
+    println("{p1.collider.is_hit(p2.collider)}")
+    println("{1 == 1}")
     0
 }
