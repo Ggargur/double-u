@@ -196,6 +196,28 @@ extend Position {
 }
 ```
 
+### Reactive events
+
+`when` registers a watcher on a condition. Every time an assignment changes a value and the condition is true, the block executes.
+
+```
+fn main() -> int {
+    let x = 0
+
+    when x > 1 {
+        println("x is {x}!")
+    }
+
+    x = 1    # x changed but x > 1 is false — nothing
+    x = 3    # x changed and x > 1 — prints "x is 3!"
+    x = 5    # x changed and x > 1 — prints "x is 5!"
+    x = 5    # x did not change — nothing
+    x = 3    # x changed and x > 1 — prints "x is 3!"
+
+    0
+}
+```
+
 ### Concurrency
 
 CSP-style with `spawn` and channels.
@@ -227,6 +249,7 @@ select {
 | Type alias | `entity Alias = OriginalType` |
 | Capability | `capability Name = {method(Args) -> Ret}` |
 | Extend | `extend Type { fn ... }` |
+| Reactive event | `when cond { body }` |
 | Early return | `^expression` |
 | Nullable type | `T?` |
 | Optional chain | `x?.field` |
@@ -335,7 +358,7 @@ Early-stage compiler. The following features are **implemented**:
 - Parser (full grammar, Earley)
 - Semantic name resolution and duplicate detection
 - Structural type checking (TypeRef, generics, nullability, wildcards, Self)
-- Tree-walking interpreter (entities, operators, pattern matching, exceptions, closures, spawn)
-- C backend (structs, methods, operator desugaring, type aliases, for loops, match)
+- Tree-walking interpreter (entities, operators, pattern matching, exceptions, closures, spawn, reactive `when`)
+- C backend (structs, methods, operator desugaring, type aliases, for loops, match, reactive `when`)
 
 Not yet implemented: module system with file imports, full type inference, LSP, formatter.

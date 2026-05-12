@@ -193,6 +193,7 @@ class _LowerCtx:
         type_aliases: dict[str, str] | None = None,
         component_names: set[str] | None = None,
         component_to_entity: dict[str, str] | None = None,
+        fn_return_types: dict[str, str] | None = None,
         current_entity: str | None = None,
         current_method_mut: bool = False,
         current_is_component: bool = False,
@@ -206,6 +207,7 @@ class _LowerCtx:
         self.type_aliases: dict[str, str] = type_aliases or {}
         self.component_names: set[str] = component_names or set()
         self.component_to_entity: dict[str, str] = component_to_entity or {}
+        self.fn_return_types: dict[str, str] = fn_return_types or {}  # top-level fn → return type
         self.current_entity = current_entity
         self.current_method_mut = current_method_mut
         self.current_is_component = current_is_component
@@ -237,6 +239,7 @@ class _LowerCtx:
             type_aliases=self.type_aliases,
             component_names=self.component_names,
             component_to_entity=self.component_to_entity,
+            fn_return_types=self.fn_return_types,
             **kwargs,
         )
         c.extra_includes = self.extra_includes
@@ -288,7 +291,13 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
             if _is_type_name(name):
                 return name   # constructor → returns the type
             if ctx.current_entity:
-                return ctx.entity_method_rets.get(ctx.current_entity, {}).get(name)
+                ret = ctx.entity_method_rets.get(ctx.current_entity, {}).get(name)
+                if ret:
+                    return ret
+            # Top-level function return type
+            ret = ctx.fn_return_types.get(name)
+            if ret:
+                return ret
         return None
 
     if isinstance(expr, BinOp):
@@ -1085,6 +1094,12 @@ def lower_program(program: Program) -> IRProgram:
             if target_name:
                 lang_type_aliases[decl.name] = target_name
 
+    # Collect top-level function return types
+    fn_return_types: dict[str, str] = {}
+    for decl in program.decls:
+        if isinstance(decl, FunctionDecl) and decl.ret:
+            fn_return_types[decl.name] = _type_to_name(decl.ret)
+
     ctx = _LowerCtx(
         type_env=_TypeEnv(),
         entity_fields=entity_fields,
@@ -1094,6 +1109,7 @@ def lower_program(program: Program) -> IRProgram:
         type_aliases=lang_type_aliases,
         component_names=component_names,
         component_to_entity=component_to_entity,
+        fn_return_types=fn_return_types,
     )
 
     # ── Second pass: emit IR ──────────────────────────────────────────────────

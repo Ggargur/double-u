@@ -1,6 +1,6 @@
 import stdio
 
-fn main() -> int {
+fn main() -> unit {
     let x = 0
 
     when x > 1 {
@@ -13,6 +13,4 @@ fn main() -> int {
     x = 5
     x = 3
     x = 5
-
-    0
 }
