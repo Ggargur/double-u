@@ -235,6 +235,10 @@ class SelectArm(Node):
     __slots__ = ("recv", "body")
     def __init__(self, recv, body): self.recv = recv; self.body = body
 
+class WhenStmt(Node):
+    __slots__ = ("cond", "body")
+    def __init__(self, cond, body): self.cond = cond; self.body = body
+
 class Block(Node):
     __slots__ = ("stmts", "tail")
     def __init__(self, stmts, tail): self.stmts = stmts; self.tail = tail
@@ -692,6 +696,10 @@ class LangTransformer(Transformer):
     def select_stmt(self, items):
         return SelectStmt([i for i in items if isinstance(i, SelectArm)])
 
+    def when_stmt(self, items):
+        nodes = [i for i in items if isinstance(i, Node)]
+        return WhenStmt(nodes[0], nodes[1])
+
     def select_arm(self, items):
         nodes  = [i for i in items if isinstance(i, Node)]
         tokens = [i for i in items if isinstance(i, Token)]
@@ -717,7 +725,7 @@ class LangTransformer(Transformer):
             if isinstance(item, Node):
                 stmts.append(item)
         _stmt_types = (Binding, Assignment, IfStmt, ForStmt, MatchStmt,
-                       TryStmt, ThrowStmt, EarlyReturn, SpawnStmt, SelectStmt)
+                       TryStmt, ThrowStmt, EarlyReturn, SpawnStmt, SelectStmt, WhenStmt)
         if stmts and not isinstance(stmts[-1], _stmt_types):
             tail = stmts.pop()
         # Fix Earley ambiguity: "^expr" is parsed as EarlyReturn(None) + expr-as-tail.

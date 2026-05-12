@@ -56,6 +56,7 @@ from .parser import (
     NominalPattern,
     ListLit,
     MapLit,
+    WhenStmt,
 )
 from .ir import (
     IRProgram,
@@ -211,6 +212,7 @@ class _LowerCtx:
         self.current_entity_for_component = current_entity_for_component
         self._tmp_counter = 0
         self.extra_includes: set[str] = set()  # shared across child contexts via _child()
+        self.watchers: list[tuple] = []  # [(cond_ir, body_ir_stmts, last_var)]
 
     def canonical(self, lang_type: str) -> str:
         """Resolve a type-alias chain to the root entity that owns the methods."""
@@ -589,6 +591,15 @@ def _infer_const_c_type(ir: IRExpr) -> str:
     return "long"
 
 
+# ── Watcher check emission ────────────────────────────────────────────────────
+
+def _emit_watcher_checks(ctx: _LowerCtx, out: list[IRStmt]):
+    """Emit watcher checks: fire if condition is true (value change is
+    handled by the caller saving old value and comparing)."""
+    for cond_ir, body_stmts in ctx.watchers:
+        out.append(IRIf(cond_ir, list(body_stmts), []))
+
+
 # ── Statement lowering ────────────────────────────────────────────────────────
 
 def lower_stmt(stmt, ctx: _LowerCtx, out: list[IRStmt]):
@@ -613,30 +624,75 @@ def lower_stmt(stmt, ctx: _LowerCtx, out: list[IRStmt]):
         val = lower_expr(stmt.value, ctx, preamble)
         out.extend(preamble)
         target = stmt.target
+
+        # Determine the IR for the target value (to save old value for watchers)
+        has_watchers = len(ctx.watchers) > 0
+        old_var = None
+        target_ir = None
+
         if isinstance(target, NameExpr):
             tname = target.name
             # Implicit self field assignment in mut method
             if (ctx.current_entity and ctx.current_method_mut
                     and tname in ctx.entity_fields.get(ctx.current_entity, [])
                     and ctx.type_env.get(tname) is None):
+                if has_watchers:
+                    old_var = ctx.fresh("_old")
+                    target_ir = IRPtrFieldAccess(IRVar("self"), tname)
+                    lang_t = ctx.entity_field_types.get(ctx.current_entity, {}).get(tname, "")
+                    out.append(IRVarDecl(old_var, _lang_type_to_c(lang_t) if lang_t else "long", target_ir))
                 out.append(IRPtrFieldAssign("self", tname, val))
+                if has_watchers and old_var:
+                    target_ir_after = IRPtrFieldAccess(IRVar("self"), tname)
             else:
+                if has_watchers:
+                    old_var = ctx.fresh("_old")
+                    lang_t = ctx.type_env.get(tname) or ""
+                    out.append(IRVarDecl(old_var, _lang_type_to_c(lang_t) if lang_t else "long", IRVar(tname)))
                 out.append(IRAssign(tname, stmt.op, val))
+                if has_watchers and old_var:
+                    target_ir_after = IRVar(tname)
         elif isinstance(target, FieldAccess):
             obj = target.obj
             if isinstance(obj, SelfExpr):
                 if ctx.current_method_mut:
+                    if has_watchers:
+                        old_var = ctx.fresh("_old")
+                        out.append(IRVarDecl(old_var, "long", IRPtrFieldAccess(IRVar("self"), target.field)))
                     out.append(IRPtrFieldAssign("self", target.field, val))
+                    if has_watchers and old_var:
+                        target_ir_after = IRPtrFieldAccess(IRVar("self"), target.field)
                 else:
+                    if has_watchers:
+                        old_var = ctx.fresh("_old")
+                        out.append(IRVarDecl(old_var, "long", IRFieldAccess(IRVar("self"), target.field)))
                     out.append(IRFieldAssign("self", target.field, val))
+                    if has_watchers and old_var:
+                        target_ir_after = IRFieldAccess(IRVar("self"), target.field)
             elif isinstance(obj, OurExpr):
+                if has_watchers:
+                    old_var = ctx.fresh("_old")
+                    out.append(IRVarDecl(old_var, "long", IRPtrFieldAccess(IRVar("our"), target.field)))
                 out.append(IRPtrFieldAssign("our", target.field, val))
+                if has_watchers and old_var:
+                    target_ir_after = IRPtrFieldAccess(IRVar("our"), target.field)
             elif isinstance(obj, NameExpr):
+                if has_watchers:
+                    old_var = ctx.fresh("_old")
+                    out.append(IRVarDecl(old_var, "long", IRFieldAccess(IRVar(obj.name), target.field)))
                 out.append(IRFieldAssign(obj.name, target.field, val))
+                if has_watchers and old_var:
+                    target_ir_after = IRFieldAccess(IRVar(obj.name), target.field)
             else:
                 raise LoweringError("Complex assignment target not supported by C backend.")
         else:
             raise LoweringError(f"Unsupported assignment target: {type(target).__name__}")
+
+        if has_watchers and old_var:
+            # Only check watchers if the value actually changed
+            watcher_stmts: list[IRStmt] = []
+            _emit_watcher_checks(ctx, watcher_stmts)
+            out.append(IRIf(IRBinOp("!=", target_ir_after, IRVar(old_var)), watcher_stmts, []))
         return
 
     if isinstance(stmt, EarlyReturn):
@@ -679,6 +735,15 @@ def lower_stmt(stmt, ctx: _LowerCtx, out: list[IRStmt]):
             iter_data=IRFieldAccess(iterable, "data"),
             body=body_out,
         ))
+        return
+
+    if isinstance(stmt, WhenStmt):
+        preamble: list[IRStmt] = []
+        cond_ir = lower_expr(stmt.cond, ctx, preamble)
+        out.extend(preamble)
+        body_out: list[IRStmt] = []
+        _lower_block_no_return(stmt.body, ctx, body_out)
+        ctx.watchers.append((cond_ir, body_out))
         return
 
     if isinstance(stmt, MatchStmt):
@@ -800,6 +865,27 @@ def _lower_block(block: Block, ctx: _LowerCtx, out: list[IRStmt]):
         tail_ir = lower_expr(tail, ctx, preamble)
         out.extend(preamble)
         out.append(IRReturn(tail_ir))
+    ctx.type_env.pop()
+
+
+def _lower_block_no_return(block: Block, ctx: _LowerCtx, out: list[IRStmt]):
+    """Like _lower_block but treats the tail as an expression statement, not a return."""
+    ctx.type_env.push()
+    stmts = list(block.stmts)
+    tail  = block.tail
+    if (stmts
+            and isinstance(stmts[-1], EarlyReturn)
+            and stmts[-1].value is None
+            and tail is not None):
+        stmts[-1] = EarlyReturn(tail)
+        tail = None
+    for stmt in stmts:
+        lower_stmt(stmt, ctx, out)
+    if tail is not None:
+        preamble: list[IRStmt] = []
+        tail_ir = lower_expr(tail, ctx, preamble)
+        out.extend(preamble)
+        out.append(IRExprStmt(tail_ir))
     ctx.type_env.pop()
 
 

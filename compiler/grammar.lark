@@ -119,6 +119,7 @@ statement: binding
          | early_return
          | spawn_stmt
          | select_stmt
+         | when_stmt
          | expression_stmt
 
 assignment:      lvalue ASSIGN_OP expression _NL?
@@ -141,6 +142,8 @@ spawn_stmt: SPAWN block
 
 select_stmt: SELECT "{" _NL* select_arm ("," _NL* select_arm)* _NL* "}"
 select_arm: (IDENTIFIER CHAN_RECV expression | TIMEOUT "(" expression ")") "=>" (expression | block)
+
+when_stmt: WHEN expression block
 
 // ── BLOCK ─────────────────────────────────────────────────────
 
@@ -247,6 +250,7 @@ SELECT.2:      "select"
 TIMEOUT.2:     "timeout"
 WHERE.2:       "where"
 LIKE.2:        "like"
+WHEN.2:        "when"
 OR.2:          "or"
 AND.2:         "and"
 SELF_EXPR.2:   "self"

@@ -5,6 +5,7 @@ entity Vector {
     y!: float
     fn add!(other: Vector) -> Vector { Vector(self.x + other.x, self.y + other.y) }
     fn sub!(other: Vector) -> Vector { Vector(self.x - other.x, self.y - other.y) }
+    
     fn distance!(other: Vector) -> float {
         const dx = self.x - other.x
         const dy = self.y - other.y

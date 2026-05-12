@@ -32,6 +32,7 @@ from .parser import (
     SpawnStmt,
     SelectStmt,
     SelectArm,
+    WhenStmt,
     NameExpr,
     BinOp,
     UnaryOp,
@@ -121,6 +122,8 @@ class Interpreter:
         self.entity_fields_map: dict[str, list[str]] = {}
         self.entity_methods_map: dict[str, dict[str, MethodDecl]] = {}
         self.component_names: set[str] = set()
+        self._watchers: list[list] = []
+        self._checking_watchers: bool = False
         self._install_builtins()
 
     # ── C library → interpreter builtin mappings ─────────────────────────────
@@ -264,6 +267,7 @@ class Interpreter:
             self.env.pop()
 
     def eval_block(self, block: Block):
+        watcher_mark = len(self._watchers)
         self.env.push()
         try:
             for stmt in block.stmts:
@@ -272,6 +276,8 @@ class Interpreter:
                 return self.eval_expr(block.tail)
             return None
         finally:
+            for w in self._watchers[watcher_mark:]:
+                w[3] = False
             self.env.pop()
 
     def exec_stmt(self, stmt):
@@ -307,6 +313,11 @@ class Interpreter:
             # Synchronous MVP: execute first arm.
             if stmt.arms:
                 self.eval_select_arm(stmt.arms[0])
+            return
+        if isinstance(stmt, WhenStmt):
+            # watcher: [cond, body, env_scopes, active]
+            watcher = [stmt.cond, stmt.body, list(self.env.scopes), True]
+            self._watchers.append(watcher)
             return
 
         # expression statement fallback
@@ -559,20 +570,29 @@ class Interpreter:
         target = assign.target
         if isinstance(target, NameExpr):
             current = self.env.get(target.name)
-            self.env.assign(target.name, self._apply_assign_op(assign.op, current, value))
+            new_val = self._apply_assign_op(assign.op, current, value)
+            self.env.assign(target.name, new_val)
+            if new_val != current:
+                self._check_watchers()
             return
         if isinstance(target, FieldAccess):
             obj = self.eval_expr(target.obj)
             if isinstance(obj, dict):
                 current = obj.get(target.field)
-                obj[target.field] = self._apply_assign_op(assign.op, current, value)
+                new_val = self._apply_assign_op(assign.op, current, value)
+                obj[target.field] = new_val
+                if new_val != current:
+                    self._check_watchers()
                 return
             raise RuntimeError("Field assignment requires a map-like object.")
         if isinstance(target, Index):
             obj = self.eval_expr(target.obj)
             idx = self.eval_expr(target.idx)
             current = obj[idx]
-            obj[idx] = self._apply_assign_op(assign.op, current, value)
+            new_val = self._apply_assign_op(assign.op, current, value)
+            obj[idx] = new_val
+            if new_val != current:
+                self._check_watchers()
             return
         raise RuntimeError("Invalid assignment target.")
 
@@ -590,6 +610,30 @@ class Interpreter:
         if op == "%=":
             return current % value
         raise RuntimeError(f"Unsupported assignment operator '{op}'.")
+
+    def _check_watchers(self):
+        if self._checking_watchers:
+            return
+        self._checking_watchers = True
+        try:
+            for w in self._watchers:
+                if not w[3]:  # not active
+                    continue
+                saved = self.env.scopes
+                self.env.scopes = w[2]
+                try:
+                    cur = bool(self.eval_expr(w[0]))
+                finally:
+                    self.env.scopes = saved
+                if cur:
+                    saved2 = self.env.scopes
+                    self.env.scopes = w[2]
+                    try:
+                        self.eval_block(w[1])
+                    finally:
+                        self.env.scopes = saved2
+        finally:
+            self._checking_watchers = False
 
     def _eval_binop(self, node: BinOp):
         left = self.eval_expr(node.left)
