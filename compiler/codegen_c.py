@@ -46,7 +46,9 @@ def _c_type(type_name: str) -> str:
         "int":         "long",
         "float":       "double",
         "bool":        "bool",
-        "string":      "const char*",
+        "string":      "WStr",
+        "WStr":        "WStr",
+        "_WArena*":    "_WArena*",
         "unit":        "void",
         "long":        "long",
         "double":      "double",
@@ -309,10 +311,14 @@ def _topo_sort_structs(structs: list[IRStructType]) -> list[IRStructType]:
 # ── Program emitter ───────────────────────────────────────────────────────────
 
 def emit_c_program(ir_prog: IRProgram) -> str:
+    from .wstr_runtime import WSTR_RUNTIME_C
+
     _EMITTED_LIST_TYPES.clear()
     out: list[str] = ["#include <stdbool.h>"]
     for inc in ir_prog.c_includes:
         out.append(f"#include {inc}")
+    out.append("")
+    out.append(WSTR_RUNTIME_C)
     out.append("")
 
     # Build alias-by-target map so each alias is emitted right after its struct

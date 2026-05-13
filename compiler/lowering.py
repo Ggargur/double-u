@@ -100,7 +100,7 @@ PRIMITIVE_C = {
     "int":    "long",
     "float":  "double",
     "bool":   "bool",
-    "string": "const char*",
+    "string": "WStr",
     "unit":   "void",
 }
 
@@ -182,6 +182,13 @@ class _TypeEnv:
 
 # ── Lowering context ──────────────────────────────────────────────────────────
 
+_WSTR_RUNTIME_FNS = frozenset({
+    "_wstr_from_lit", "_wstr_concat", "_wstr_eq", "_wstr_len",
+    "_wstr_data", "_wstr_index", "_wstr_from_char", "_wstr_from_snprintf",
+    "_w_arena_new", "_w_arena_free", "_w_arena_alloc", "_w_cstrlen",
+})
+
+
 class _LowerCtx:
     def __init__(
         self,
@@ -198,6 +205,9 @@ class _LowerCtx:
         current_method_mut: bool = False,
         current_is_component: bool = False,
         current_entity_for_component: str | None = None,
+        c_extern_fns: set[str] | None = None,
+        c_extern_all: bool = False,
+        user_fn_names: set[str] | None = None,
     ):
         self.type_env = type_env
         self.entity_fields = entity_fields
@@ -212,6 +222,9 @@ class _LowerCtx:
         self.current_method_mut = current_method_mut
         self.current_is_component = current_is_component
         self.current_entity_for_component = current_entity_for_component
+        self.c_extern_fns: set[str] = c_extern_fns or set()
+        self.c_extern_all = c_extern_all
+        self.user_fn_names: set[str] = user_fn_names or set()
         self._tmp_counter = 0
         self.extra_includes: set[str] = set()  # shared across child contexts via _child()
         self.watchers: list[tuple] = []  # [(cond_ir, body_ir_stmts, last_var)]
@@ -240,6 +253,9 @@ class _LowerCtx:
             component_names=self.component_names,
             component_to_entity=self.component_to_entity,
             fn_return_types=self.fn_return_types,
+            c_extern_fns=self.c_extern_fns,
+            c_extern_all=self.c_extern_all,
+            user_fn_names=self.user_fn_names,
             **kwargs,
         )
         c.extra_includes = self.extra_includes
@@ -254,7 +270,7 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
         # 1. Locals / params
         t = ctx.type_env.get(expr.name)
         if t:
-            return t
+            return "string" if t == "string_global" else t
         # 2. Implicit self field
         if ctx.current_entity:
             t = ctx.entity_field_types.get(ctx.current_entity, {}).get(expr.name)
@@ -314,6 +330,9 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
         if right_type and right_type in ctx.entity_methods and method:
             ret = ctx.entity_method_rets.get(right_type, {}).get(method)
             if ret: return ret
+        # String concat
+        if expr.op == "+" and left_type == "string":
+            return "string"
         # Numeric promotion: if either side is float, result is float
         float_types = {"float", "double"}
         if left_type in float_types or right_type in float_types:
@@ -322,6 +341,24 @@ def _resolve_expr_type(expr, ctx: _LowerCtx) -> str | None:
 
     if isinstance(expr, ConstructorCall):
         return expr.type_name
+
+    if isinstance(expr, Index):
+        obj_type = _resolve_expr_type(expr.obj, ctx)
+        if obj_type == "string":
+            return "string"
+        return None
+
+    if isinstance(expr, StringLit):
+        return "string"
+
+    if isinstance(expr, IntLit):
+        return "int"
+
+    if isinstance(expr, FloatLit):
+        return "float"
+
+    if isinstance(expr, BoolLit):
+        return "bool"
 
     return None
 
@@ -349,7 +386,8 @@ def _fmt_spec(lang_type: str | None) -> str:
 def _lower_string_lit(node: StringLit, ctx: _LowerCtx, out_preamble: list) -> IRExpr:
     has_interp = any(isinstance(p, tuple) for p in node.parts)
     if not has_interp:
-        return IRConst("".join(str(p) for p in node.parts))
+        text = "".join(str(p) for p in node.parts)
+        return IRCall("_wstr_from_lit", [IRConst(text), IRConst(len(text))])
 
     ctx.extra_includes.add("<stdio.h>")
 
@@ -362,17 +400,15 @@ def _lower_string_lit(node: StringLit, ctx: _LowerCtx, out_preamble: list) -> IR
             expr_type = _resolve_expr_type(expr_node, ctx)
             if expr_type == "bool":
                 expr_ir = IRTernary(expr_ir, IRConst("true"), IRConst("false"))
+            elif expr_type == "string":
+                expr_ir = IRCall("_wstr_data", [expr_ir])
             fmt_parts.append(_fmt_spec(expr_type))
             args.append(expr_ir)
         else:
             fmt_parts.append(str(part).replace("%", "%%"))
 
-    buf = ctx.fresh("_s")
-    out_preamble.append(IRCharBuf(buf, 512))
-    out_preamble.append(IRExprStmt(
-        IRCall("snprintf", [IRVar(buf), IRConst(512), IRConst("".join(fmt_parts))] + args)
-    ))
-    return IRVar(buf)
+    return IRCall("_wstr_from_snprintf",
+                  [IRVar("_a"), IRConst("".join(fmt_parts))] + args)
 
 
 # ── Expression lowering ───────────────────────────────────────────────────────
@@ -397,6 +433,9 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
                 if ctx.current_method_mut:
                     return IRPtrFieldAccess(IRVar("self"), name)
                 return IRFieldAccess(IRVar("self"), name)
+        # Global string (stored as const char*) → wrap in _wstr_from_lit at use site
+        if ctx.type_env.get(name) == "string_global":
+            return IRCall("_wstr_from_lit", [IRVar(name), IRCall("_w_cstrlen", [IRVar(name)])])
         return IRVar(name)
 
     if isinstance(expr, SelfExpr):
@@ -416,7 +455,7 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
                 left_ir  = lower_expr(expr.left,  ctx, out_preamble)
                 right_ir = lower_expr(expr.right, ctx, out_preamble)
                 canon = ctx.canonical(left_type)
-                return IRCall(f"{canon}__{method}", [left_ir, right_ir])
+                return IRCall(f"{canon}__{method}", [IRVar("_a"), left_ir, right_ir])
 
         # Reverse dispatch: right is entity, left is not → right.method(left)
         # Handles: scalar * vector, scalar + vector, etc.
@@ -425,7 +464,17 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
                 left_ir  = lower_expr(expr.left,  ctx, out_preamble)
                 right_ir = lower_expr(expr.right, ctx, out_preamble)
                 canon = ctx.canonical(right_type)
-                return IRCall(f"{canon}__{method}", [right_ir, left_ir])
+                return IRCall(f"{canon}__{method}", [IRVar("_a"), right_ir, left_ir])
+
+        # String operations
+        if left_type == "string":
+            left_ir  = lower_expr(expr.left,  ctx, out_preamble)
+            right_ir = lower_expr(expr.right, ctx, out_preamble)
+            if expr.op == "+":
+                return IRCall("_wstr_concat", [IRVar("_a"), left_ir, right_ir])
+            if expr.op in ("==", "!="):
+                eq = IRCall("_wstr_eq", [left_ir, right_ir])
+                return IRUnaryOp("!", eq) if expr.op == "!=" else eq
 
         # Primitive binary op
         left  = lower_expr(expr.left,  ctx, out_preamble)
@@ -436,6 +485,10 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
         return IRUnaryOp(expr.op, lower_expr(expr.operand, ctx, out_preamble))
 
     if isinstance(expr, FieldAccess):
+        # String .length
+        if expr.field == "length" and _resolve_expr_type(expr.obj, ctx) == "string":
+            obj = lower_expr(expr.obj, ctx, out_preamble)
+            return IRCall("_wstr_len", [obj])
         obj = lower_expr(expr.obj, ctx, out_preamble)
         if _is_mut_receiver(expr.obj, ctx):
             return IRPtrFieldAccess(obj, expr.field)
@@ -448,6 +501,10 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
     if isinstance(expr, Index):
         obj = lower_expr(expr.obj, ctx, out_preamble)
         idx = lower_expr(expr.idx, ctx, out_preamble)
+        # String indexing → WStr
+        if _resolve_expr_type(expr.obj, ctx) == "string":
+            return IRCall("_wstr_from_char",
+                          [IRVar("_a"), IRCall("_wstr_index", [obj, idx])])
         return IRIndex(IRFieldAccess(obj, "data"), idx)
 
     if isinstance(expr, Call):
@@ -474,8 +531,9 @@ def lower_expr(expr, ctx: _LowerCtx, out_preamble: list[IRStmt]) -> IRExpr:
 
 def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
     callee = node.callee
+    raw_args = node.args
     args_ir = [lower_expr(a.value if isinstance(a, Argument) else a, ctx, preamble)
-               for a in node.args]
+               for a in raw_args]
 
     # obj.method(args) — method call on explicit receiver
     if isinstance(callee, FieldAccess):
@@ -497,7 +555,7 @@ def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
                     our_ir = IRUnaryOp("&", entity_ir)
                 else:
                     our_ir = IRVar("our")  # already inside component method
-                return IRCall(fn_name, [self_arg, our_ir] + args_ir)
+                return IRCall(fn_name, [IRVar("_a"), self_arg, our_ir] + args_ir)
 
         if obj_lang_type and obj_lang_type in ctx.entity_methods:
             method_decl = ctx.entity_methods[obj_lang_type].get(method_name)
@@ -505,7 +563,7 @@ def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
                 canon = ctx.canonical(obj_lang_type)
                 fn_name = f"{canon}__{method_name}"
                 self_arg = _self_arg_for_call(obj_ir, callee.obj, method_decl, ctx)
-                return IRCall(fn_name, [self_arg] + args_ir)
+                return IRCall(fn_name, [IRVar("_a"), self_arg] + args_ir)
 
         return IRCall(f"__unresolved__{method_name}", [obj_ir] + args_ir)
 
@@ -518,7 +576,7 @@ def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
             field_names = ctx.entity_fields.get(name, [])
             if field_names or name in ctx.entity_fields:
                 return IRNew(name, field_names[:len(args_ir)], args_ir)
-            return IRCall(f"{name}__new", args_ir)
+            return IRCall(f"{name}__new", [IRVar("_a")] + args_ir)
 
         # Implicit self method call: bare method name inside entity method body
         if ctx.current_entity and name in ctx.entity_methods.get(ctx.current_entity, {}):
@@ -536,11 +594,40 @@ def _lower_call(node: Call, ctx: _LowerCtx, preamble: list[IRStmt]) -> IRExpr:
                 self_arg = IRUnaryOp("*", IRVar("self"))
             else:
                 self_arg = IRVar("self")
-            return IRCall(fn_name, [self_arg] + args_ir)
+            return IRCall(fn_name, [IRVar("_a"), self_arg] + args_ir)
 
-        return IRCall(name, args_ir)
+        # WStr runtime helper call
+        if name in _WSTR_RUNTIME_FNS:
+            return IRCall(name, args_ir)
+
+        # User-defined function → prepend arena
+        if name in ctx.user_fn_names:
+            return IRCall(name, [IRVar("_a")] + args_ir)
+
+        # C-extern call (explicit item or wildcard import c.<header>)
+        if name in ctx.c_extern_fns or ctx.c_extern_all:
+            if name not in ctx.user_fn_names:
+                args_ir = _wrap_wstr_args_for_c(raw_args, args_ir, ctx)
+            return IRCall(name, args_ir)
+
+        # Default: language function call
+        return IRCall(name, [IRVar("_a")] + args_ir)
 
     raise LoweringError(f"Unsupported callee form: {type(callee).__name__}")
+
+
+def _wrap_wstr_args_for_c(raw_args, args_ir: list[IRExpr], ctx: _LowerCtx) -> list[IRExpr]:
+    """Wrap WStr arguments with _wstr_data() when calling C-extern functions."""
+    result = []
+    for i, a in enumerate(args_ir):
+        raw = raw_args[i] if i < len(raw_args) else None
+        if raw is not None:
+            raw_expr = raw.value if isinstance(raw, Argument) else raw
+            if _resolve_expr_type(raw_expr, ctx) == "string":
+                result.append(IRCall("_wstr_data", [a]))
+                continue
+        result.append(a)
+    return result
 
 
 def _self_arg_for_call(obj_ir: IRExpr, obj_expr, method_decl: MethodDecl, ctx: _LowerCtx) -> IRExpr:
@@ -571,7 +658,7 @@ def _lower_constructor(node: ConstructorCall, ctx: _LowerCtx, preamble: list[IRS
                for a in node.args]
     field_names = ctx.entity_fields.get(type_name, [])
     if not field_names and args_ir:
-        return IRCall(f"{type_name}__new", args_ir)
+        return IRCall(f"{type_name}__new", [IRVar("_a")] + args_ir)
     return IRNew(type_name, field_names[:len(args_ir)], args_ir)
 
 
@@ -816,7 +903,12 @@ def _lower_match(arms: list[MatchArm], val_ir: IRExpr, ctx: _LowerCtx, out: list
         _lower_arm_body(arm, ctx, then_out)
         else_out: list[IRStmt] = []
         _lower_match(rest, val_ir, ctx, else_out)
-        out.append(IRIf(IRBinOp("==", val_ir, pat_val), then_out, else_out))
+        # Use _wstr_eq for string patterns
+        if isinstance(pat.lit, StringLit):
+            cond = IRCall("_wstr_eq", [val_ir, pat_val])
+        else:
+            cond = IRBinOp("==", val_ir, pat_val)
+        out.append(IRIf(cond, then_out, else_out))
         return
 
     if isinstance(pat, NominalPattern):
@@ -914,12 +1006,12 @@ def _lower_entity(decl: EntityDecl, ctx: _LowerCtx, out_struct: list, out_fns: l
     ctx.entity_fields[name] = field_names
 
     if field_names:
-        params = [(f.name, f.c_type) for f in fields]
+        params = [("_a", "_WArena*")] + [(f.name, f.c_type) for f in fields]
         out_fns.append(IRFunction(
             name=f"{name}__new",
             params=params,
             ret_type=name,
-            stmts=[IRReturn(IRNew(name, field_names, [IRVar(n) for n, _ in params]))],
+            stmts=[IRReturn(IRNew(name, field_names, [IRVar(n) for n, _ in params if n != "_a"]))],
         ))
 
     for member in decl.members:
@@ -935,11 +1027,11 @@ def _lower_method(method: MethodDecl, entity_name: str, ctx: _LowerCtx, out_fns:
     method_ctx.type_env.define("self", entity_name)
 
     if method.mut:
-        params = [("self", f"{entity_name}*")] + [
+        params = [("_a", "_WArena*"), ("self", f"{entity_name}*")] + [
             (p.name, _type_to_c(p.type)) for p in (method.params or [])
         ]
     else:
-        params = [("self", entity_name)] + [
+        params = [("_a", "_WArena*"), ("self", entity_name)] + [
             (p.name, _type_to_c(p.type)) for p in (method.params or [])
         ]
 
@@ -1010,7 +1102,7 @@ def _lower_component_method(
     extra_params = [
         (p.name, _type_to_c(p.type)) for p in (method.params or [])
     ]
-    params = [self_param, our_param] + extra_params
+    params = [("_a", "_WArena*"), self_param, our_param] + extra_params
 
     for p in (method.params or []):
         method_ctx.type_env.define(p.name, _type_to_name(p.type))
@@ -1033,7 +1125,11 @@ def _lower_component_method(
 
 def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
     fn_ctx = ctx.child()
+    is_main = fn.name == "main"
+
     params: list[tuple[str, str]] = []
+    if not is_main:
+        params.append(("_a", "_WArena*"))
     for p in (fn.params or []):
         c_type = _type_to_c(p.type)
         params.append((p.name, c_type))
@@ -1041,10 +1137,36 @@ def lower_function(fn: FunctionDecl, ctx: _LowerCtx) -> IRFunction:
 
     ret_type = _type_to_c(fn.ret) if fn.ret else "void"
     stmts: list[IRStmt] = []
+
+    if is_main:
+        stmts.append(IRVarDecl("_a", "_WArena*", IRCall("_w_arena_new", [IRConst(4096)])))
+
     _lower_block(fn.body, fn_ctx, stmts)
+
+    if is_main:
+        _inject_arena_free(stmts)
+
     if ret_type == "void":
         _fix_void_tail(stmts)
     return IRFunction(name=fn.name, params=params, ret_type=ret_type, stmts=stmts)
+
+
+def _inject_arena_free(stmts: list[IRStmt]):
+    """Insert _w_arena_free(_a) before every IRReturn in *stmts* (recursively)."""
+    free_stmt = IRExprStmt(IRCall("_w_arena_free", [IRVar("_a")]))
+    i = 0
+    while i < len(stmts):
+        s = stmts[i]
+        if isinstance(s, IRReturn):
+            stmts.insert(i, free_stmt)
+            i += 2  # skip both the free and the return
+        else:
+            if isinstance(s, IRIf):
+                _inject_arena_free(s.then_stmts)
+                _inject_arena_free(s.else_stmts)
+            elif isinstance(s, IRFor):
+                _inject_arena_free(s.body)
+            i += 1
 
 
 def _extract_c_includes(program: Program) -> list[str]:
@@ -1096,9 +1218,24 @@ def lower_program(program: Program) -> IRProgram:
 
     # Collect top-level function return types
     fn_return_types: dict[str, str] = {}
+    user_fn_names: set[str] = set()
     for decl in program.decls:
-        if isinstance(decl, FunctionDecl) and decl.ret:
-            fn_return_types[decl.name] = _type_to_name(decl.ret)
+        if isinstance(decl, FunctionDecl):
+            user_fn_names.add(decl.name)
+            if decl.ret:
+                fn_return_types[decl.name] = _type_to_name(decl.ret)
+
+    # Collect C-extern function names from imports
+    c_extern_fns: set[str] = set()
+    c_extern_all = False
+    for imp in program.imports:
+        if imp.module and imp.module[0] == "c":
+            if imp.items:
+                for item in imp.items:
+                    name = getattr(item, "name", None) or str(item)
+                    c_extern_fns.add(name)
+            else:
+                c_extern_all = True
 
     ctx = _LowerCtx(
         type_env=_TypeEnv(),
@@ -1110,7 +1247,13 @@ def lower_program(program: Program) -> IRProgram:
         component_names=component_names,
         component_to_entity=component_to_entity,
         fn_return_types=fn_return_types,
+        c_extern_fns=c_extern_fns,
+        c_extern_all=c_extern_all,
+        user_fn_names=user_fn_names,
     )
+
+    # WStr runtime requires these headers
+    ctx.extra_includes.update({"<stdlib.h>", "<stdarg.h>", "<stdio.h>"})
 
     # ── Second pass: emit IR ──────────────────────────────────────────────────
     struct_types: list[IRStructType] = []
@@ -1138,11 +1281,19 @@ def lower_program(program: Program) -> IRProgram:
                 entity_method_rets[decl.name] = entity_method_rets.get(target_name, {})
 
         elif isinstance(decl, Binding):
+            lang_type = _resolve_expr_type(decl.value, ctx) or ""
+            # String globals stay as const char* — converted to WStr at use site
+            if lang_type == "string" and isinstance(decl.value, StringLit):
+                parts = decl.value.parts
+                if not any(isinstance(p, tuple) for p in parts):
+                    text = "".join(str(p) for p in parts)
+                    globals_out.append(IRVarDecl(decl.name, "const char*", IRConst(text)))
+                    ctx.type_env.define(decl.name, "string_global")
+                    continue
             preamble: list[IRStmt] = []
             val = lower_expr(decl.value, ctx, preamble)
             if preamble:
                 raise LoweringError("Global list/complex expressions not supported in C global scope.")
-            lang_type = _resolve_expr_type(decl.value, ctx) or ""
             c_type = (_type_to_c(decl.type) if decl.type
                       else _lang_type_to_c(lang_type) if lang_type
                       else _infer_const_c_type(val))
