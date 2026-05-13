@@ -13,6 +13,8 @@ entity Vector {
     }
 }
 
+capability Transformable = { transform: Transform }
+
 entity Object {
     transform!: Transform
     collider!:  Collider
@@ -22,7 +24,7 @@ component Transform {
     position!: Vector
 }
 
-component Collider {
+component Collider requires Transformable {
     radius!: float
     fn intersects!(other_radius: float, other_pos: Vector) -> bool {
         our.transform.position.distance(other_pos) < self.radius + other_radius

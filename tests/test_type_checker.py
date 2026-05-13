@@ -613,6 +613,38 @@ fn main!() -> unit {
 }
 """, "List index must be int, got string")
 
+    section("Component requires")
+    check_ok("owner satisfies required capability", """\
+capability Movable = {mut move(float, float) -> unit}
+entity Object {
+    collider!: Collider
+    mut fn move!(dx: float, dy: float) -> unit { }
+}
+component Collider requires Movable {
+    radius!: float
+}
+""")
+    check_fail("owner missing required capability", """\
+capability Movable = {move(float, float) -> unit}
+entity Object {
+    collider!: Collider
+}
+component Collider requires Movable {
+    radius!: float
+}
+""", "uses component 'Collider', which requires capability 'Movable'")
+    check_fail("requires must be capability", """\
+entity NotCapability {
+    x!: int
+}
+entity Owner {
+    c!: C
+}
+component C requires NotCapability {
+    x!: int
+}
+""", "only capabilities are allowed")
+
     # ═══════════════════════════════════════════════════════════════════
 
     if _failures:

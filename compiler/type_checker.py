@@ -79,7 +79,7 @@ from .parser import (
     NominalPattern,
     StructuralPattern,
 )
-from .semantic import build_module_symbols, SemanticError
+from .semantic import build_module_symbols, _build_component_entity_map, SemanticError
 from .types import (
     WType,
     WPrimitive,
@@ -281,6 +281,18 @@ def _pass1_check_decl_types(program: Program, module_symbols: dict, errors: list
 
         elif isinstance(decl, ComponentDecl):
             comp_scope = _check_generic_params(decl.generics, f"component '{decl.name}'", set(), module_symbols, errors)
+            for req in getattr(decl, "requires", []):
+                _check_type(req, _TypeContext(f"component '{decl.name}' requires-clause"), comp_scope, module_symbols, errors)
+                sym = module_symbols.get(req.name)
+                if sym is None or sym.kind != "capability":
+                    errors.append(
+                        f"Component '{decl.name}' requires '{req.name}', but only capabilities are allowed."
+                    )
+                if req.args:
+                    errors.append(
+                        f"Component '{decl.name}' requires '{req.name}' with generic args, "
+                        "but generic capabilities in requires are not supported yet."
+                    )
             for member in decl.members:
                 if isinstance(member, FieldDecl):
                     _check_type(member.type, _TypeContext(f"field '{decl.name}.{member.name}'", allow_self=True), comp_scope, module_symbols, errors)
@@ -367,9 +379,17 @@ class FunctionInfo:
 
 
 @dataclass
+class CapabilityInfo:
+    name: str
+    body: WCapability
+    generics: list[GenericParam] | None = None
+
+
+@dataclass
 class Registries:
     entities: dict[str, EntityInfo] = field(default_factory=dict)
     functions: dict[str, FunctionInfo] = field(default_factory=dict)
+    capabilities: dict[str, CapabilityInfo] = field(default_factory=dict)
     exceptions: dict[str, list[tuple[str, WType]]] = field(default_factory=dict)
     type_aliases: dict[str, str] = field(default_factory=dict)
     module_symbols: dict = field(default_factory=dict)
@@ -561,6 +581,18 @@ def _build_registries(program: Program, module_symbols: dict, errors: list[str])
                 name=decl.name, params=params, ret=ret, generics=decl.generics,
             )
 
+    # Register capabilities
+    for decl in program.decls:
+        if isinstance(decl, CapabilityDecl):
+            cap_scope = _build_generic_scope(decl.generics, reg)
+            cap_body = _resolve_type_node(decl.body, cap_scope, reg, decl.name)
+            if isinstance(cap_body, WCapability):
+                reg.capabilities[decl.name] = CapabilityInfo(
+                    name=decl.name,
+                    body=cap_body,
+                    generics=decl.generics,
+                )
+
     # Register exceptions
     for decl in program.decls:
         if isinstance(decl, ExceptionDecl):
@@ -571,6 +603,93 @@ def _build_registries(program: Program, module_symbols: dict, errors: list[str])
             reg.exceptions[decl.name] = params
 
     return reg
+
+
+def _types_compatible(expected: WType, actual: WType, aliases: dict[str, str]) -> bool:
+    return is_assignable(expected, actual, aliases) and is_assignable(actual, expected, aliases)
+
+
+def _entity_satisfies_capability(
+    entity_info: EntityInfo,
+    capability: WCapability,
+    aliases: dict[str, str],
+) -> tuple[bool, str | None]:
+    for member in capability.members:
+        if isinstance(member, CapField):
+            field_info = entity_info.fields.get(member.name)
+            if field_info is not None:
+                if not _types_compatible(member.type, field_info.type, aliases):
+                    return False, (
+                        f"member '{member.name}' type mismatch: "
+                        f"expected {type_name(member.type)}, got {type_name(field_info.type)}"
+                    )
+                continue
+
+            method_info = entity_info.methods.get(member.name)
+            if method_info is not None and not method_info.params:
+                if not _types_compatible(member.type, method_info.ret, aliases):
+                    return False, (
+                        f"member '{member.name}' return type mismatch: "
+                        f"expected {type_name(member.type)}, got {type_name(method_info.ret)}"
+                    )
+                continue
+
+            return False, f"missing member '{member.name}'"
+
+        method_info = entity_info.methods.get(member.name)
+        if method_info is None:
+            return False, f"missing method '{member.name}'"
+        if method_info.mut != member.mut:
+            required = "mut " if member.mut else ""
+            actual = "mut " if method_info.mut else ""
+            return False, f"method '{member.name}' mutability mismatch: expected {required}fn, got {actual}fn"
+        if len(method_info.params) != len(member.args):
+            return False, (
+                f"method '{member.name}' arity mismatch: expected {len(member.args)} args, "
+                f"got {len(method_info.params)}"
+            )
+        for (_, actual_type), expected_type in zip(method_info.params, member.args):
+            if not _types_compatible(expected_type, actual_type, aliases):
+                return False, (
+                    f"method '{member.name}' parameter mismatch: "
+                    f"expected {type_name(expected_type)}, got {type_name(actual_type)}"
+                )
+
+        expected_ret = member.ret if member.ret is not None else UNIT
+        if not _types_compatible(expected_ret, method_info.ret, aliases):
+            return False, (
+                f"method '{member.name}' return mismatch: "
+                f"expected {type_name(expected_ret)}, got {type_name(method_info.ret)}"
+            )
+
+    return True, None
+
+
+def _check_component_requires(program: Program, registries: Registries, errors: list[str]) -> None:
+    component_to_entity = getattr(registries, "_component_to_entity", {})
+    for decl in program.decls:
+        if not isinstance(decl, ComponentDecl):
+            continue
+        if not getattr(decl, "requires", None):
+            continue
+
+        owner_name = component_to_entity.get(decl.name)
+        if owner_name is None:
+            continue
+        owner_info = registries.entities.get(owner_name)
+        if owner_info is None:
+            continue
+
+        for req in decl.requires:
+            cap_info = registries.capabilities.get(req.name)
+            if cap_info is None:
+                continue
+            ok, reason = _entity_satisfies_capability(owner_info, cap_info.body, registries.type_aliases)
+            if not ok:
+                errors.append(
+                    f"Entity '{owner_name}' uses component '{decl.name}', which requires capability "
+                    f"'{req.name}', but {reason}."
+                )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1572,6 +1691,7 @@ def check_program(program: Program) -> None:
     errors: list[str] = []
     try:
         module_symbols = build_module_symbols(program)
+        program.component_to_entity = _build_component_entity_map(program, module_symbols)
     except SemanticError as e:
         raise TypeCheckError(str(e)) from e
 
@@ -1582,6 +1702,9 @@ def check_program(program: Program) -> None:
 
     # Pass 2: Build registries
     registries = _build_registries(program, module_symbols, errors)
+    _check_component_requires(program, registries, errors)
+    if errors:
+        raise TypeCheckError("\n".join(errors))
 
     # Pass 3: Check function and method bodies
     checker = _Checker(registries, errors)

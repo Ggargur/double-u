@@ -88,10 +88,8 @@ fn main!() -> int {
     println("{sqrt(25.0)}")
 
     let p1 = Particle(Vector(0.0, 0.0, 0.0), Vector(0.0, 0.0, 0.0), 1.0, Collider(1.0, Point(1.0, 1.0, 1.0)))
-
     let p2 = Particle(Vector(0.0, 0.0, 0.0), Vector(0.0, 0.0, 0.0), 1.0, Collider(3.0, Point(1.0, 5.0000001, 1.0)))
-    
-    println("{p1.collider.is_hit(p2.collider)}")
+    rintln("{p1.collider.is_hit(p2.collider)}")
     println("{1 == 1}")
     0
 }

@@ -58,9 +58,10 @@ class EntityAlias(Node):
         self.name = name; self.generics = generics; self.target = target
 
 class ComponentDecl(Node):
-    __slots__ = ("attrs", "name", "generics", "members")
-    def __init__(self, attrs, name, generics, members):
-        self.attrs = attrs; self.name = name; self.generics = generics; self.members = members
+    __slots__ = ("attrs", "name", "generics", "requires", "members")
+    def __init__(self, attrs, name, generics, requires, members):
+        self.attrs = attrs; self.name = name; self.generics = generics
+        self.requires = requires; self.members = members
 
 class FieldDecl(Node):
     __slots__ = ("attrs", "name", "public", "type", "default")
@@ -432,11 +433,15 @@ class LangTransformer(Transformer):
         nodes    = [i for i in items if isinstance(i, Node) and not isinstance(i, Attribute)]
         name     = self._s(next(t for t in tokens if t.type == "TYPE_NAME"))
         generics = next((n for n in lists if n and isinstance(n[0], GenericParam)), None)
+        requires = next((n for n in lists if n and isinstance(n[0], TypeRef)), [])
         members  = [i for i in nodes if isinstance(i, (FieldDecl, MethodDecl))]
-        return ComponentDecl(attrs, name, generics, members)
+        return ComponentDecl(attrs, name, generics, requires, members)
 
     def component_member(self, items):
         return items[0]
+
+    def component_requires(self, items):
+        return [i for i in items if isinstance(i, TypeRef)]
 
     def our_expr(self, items):
         return OurExpr()
@@ -501,9 +506,10 @@ class LangTransformer(Transformer):
     def cap_method(self, items):
         tokens = [i for i in items if isinstance(i, Token)]
         nodes  = [i for i in items if isinstance(i, Node)]
+        lists  = [i for i in items if isinstance(i, list)]
         mut  = any(self._s(t) == "mut" for t in tokens)
         name = self._s(next(t for t in tokens if t.type == "IDENTIFIER"))
-        args = next((n for n in nodes if isinstance(n, list)), [])
+        args = lists[0] if lists else []
         ret  = next((n for n in nodes if isinstance(n, Node) and not isinstance(n, list)), None)
         return CapMethodMember(mut, name, args, ret)
 

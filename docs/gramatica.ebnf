@@ -23,6 +23,7 @@ program            = { import_stmt }, { top_level_decl } ;
 
 top_level_decl     = entity_decl
                    | entity_alias
+                   | component_decl
                    | capability_decl
                    | extend_decl
                    | attribute_decl
@@ -62,6 +63,18 @@ method_decl        = { attribute }, [ "mut" ], "fn", identifier, [ "!" ],
 
 constructor_decl   = { attribute }, "constructor",
                      "(", [ params ], ")", block ;
+
+
+(* === COMPONENTES === *)
+
+component_decl     = { attribute }, "component", type_name,
+                     [ generic_params ], [ component_requires ],
+                     "{", { component_member }, "}" ;
+
+component_requires = "requires", type_ref, { ",", type_ref } ;
+
+component_member   = field_decl
+                   | method_decl ;
 
 
 (* === CAPACIDADES === *)
@@ -353,11 +366,11 @@ docstring          = '"""', { ? qualquer caractere ? }, '"""' ;
 (*  PALAVRAS RESERVADAS                                         *)
 (* ============================================================ *)
 
-(* entity, capability, extend, attribute, exception,            *)
+(* entity, component, capability, extend, attribute, exception, *)
 (* fn, mut, constructor,                                        *)
 (* const, let,                                                  *)
 (* if, else, for, in, match, try, catch, throw,                 *)
-(* import, as, where, like,                                     *)
+(* import, as, where, requires, like,                           *)
 (* spawn, select, timeout,                                      *)
 (* self, Self,                                                  *)
 (* true, false, null,                                           *)

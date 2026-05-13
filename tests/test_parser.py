@@ -111,6 +111,12 @@ entity Position {
     check("capability alias", 'capability Drawable = {draw(Canvas) -> unit}\n')
     check("capability wildcard args", 'fn push!(thing: {move(_, _)}) -> unit { }\n')
     check("capability like", 'capability Pushable = {push like vector.push}\n')
+    check("component requires", """\
+capability Movable = {move(float, float) -> unit}
+component Collider requires Movable {
+    radius!: float
+}
+""")
 
     section("Control flow")
     check("if else", """\

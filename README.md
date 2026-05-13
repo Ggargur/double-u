@@ -63,6 +63,25 @@ const p = Position(3.0, 4.0)   # implicit constructor
 
 Fields and methods marked with `!` are public. Everything else is private to the module.
 
+### Components with `requires`
+
+Components can declare capability preconditions for their owning entity.
+
+```
+capability Movable = {mut move(float, float) -> unit}
+
+entity Object {
+    collider!: Collider
+    mut fn move!(dx: float, dy: float) -> unit { }
+}
+
+component Collider requires Movable {
+    radius!: float
+}
+```
+
+`requires` means: any entity that contains that component as a direct field must satisfy all listed capabilities.
+
 ### Mutability
 
 Explicit everywhere. Variables are `const` (deeply immutable) or `let` (mutable). Methods that mutate `self` are declared `mut fn`.
@@ -246,6 +265,7 @@ select {
 | Function | `fn name!(params) -> Type { body }` |
 | Mutating method | `mut fn name!(params) -> Type { body }` |
 | Entity | `entity Name { field!: Type }` |
+| Component with requirements | `component Name requires CapabilityA, CapabilityB { ... }` |
 | Type alias | `entity Alias = OriginalType` |
 | Capability | `capability Name = {method(Args) -> Ret}` |
 | Extend | `extend Type { fn ... }` |

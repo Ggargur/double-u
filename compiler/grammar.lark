@@ -33,7 +33,8 @@ entity_member: (field_decl | method_decl | constructor_decl) _NL*
 
 // ── COMPONENTS ────────────────────────────────────────────────
 
-component_decl: attribute_line* COMPONENT TYPE_NAME generic_params? "{" _NL* component_member* "}"
+component_decl: attribute_line* COMPONENT TYPE_NAME generic_params? component_requires? "{" _NL* component_member* "}"
+component_requires: REQUIRES type_ref ("," type_ref)*
 component_member: (field_decl | method_decl) _NL*
 
 field_decl:      attribute_line* IDENTIFIER PUBLIC? ":" type ("=" expression)? _NL
@@ -249,7 +250,8 @@ SPAWN.2:       "spawn"
 SELECT.2:      "select"
 TIMEOUT.2:     "timeout"
 WHERE.2:       "where"
-LIKE.2:        "like"
+REQUIRES.2:     "requires"
+LIKE.2:         "like"
 WHEN.2:        "when"
 OR.2:          "or"
 AND.2:         "and"
