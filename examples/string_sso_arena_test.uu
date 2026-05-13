@@ -1,0 +1,33 @@
+import stdio
+
+fn main!() -> int {
+    let status = 0
+
+    # SSO path: short strings should stay inline
+    const short_a = "abc"
+    const short_b = "def"
+    const short_join = short_a + short_b
+    if short_join != "abcdef" {
+        status = 1
+    }
+
+    # Arena path 1: concat producing a long string
+    const long_base = "1234567890123456789012345678901234567890"
+    const long_join = long_base + "++"
+    if long_join != "1234567890123456789012345678901234567890++" {
+        status = 2
+    }
+
+    # Arena path 2: interpolation with long formatted output
+    const n = 12345
+    const interp = "id={n}; payload=abcdefghijklmnopqrstuvwxyz-1234567890"
+    if interp != "id=12345; payload=abcdefghijklmnopqrstuvwxyz-1234567890" {
+        status = 3
+    }
+
+    println("{short_join}")
+    println("{long_join}")
+    println("{interp}")
+    println("{status}")
+    status
+}

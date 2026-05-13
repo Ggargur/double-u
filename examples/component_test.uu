@@ -1,4 +1,4 @@
-import c.stdio
+import stdio
 
 entity Vector {
     x!: float
@@ -31,7 +31,7 @@ component Collider {
 
 fn main!() -> int {
     const a = Object(Transform(Vector(0.0, 0.0)), Collider(1.5))
-    const b = Object(Transform(Vector(1.0, 0.0)), Collider(1.0))
-    printf("%d\n", a.collider.intersects(b.collider.radius, b.transform.position))
+    const b = Object(Transform(Vector(5.0, 0.0)), Collider(1.0))
+    println("{a.collider.intersects(b.collider.radius, b.transform.position)}")
     0
 }
