@@ -24,6 +24,7 @@ def check_ok(label: str, src: str, must_contain: list[str] | None = None):
         for needle in must_contain or []:
             if needle not in c_code:
                 print(f"  FAIL {label}: missing '{needle}' in generated C")
+                print(f"        Generated C:\n{c_code}")
                 _failures += 1
                 return
         print(f"  OK  {label}")
@@ -91,14 +92,14 @@ entity Vec2 {
     x!: float
     y!: float
 }
-fn main!() -> Vec2 { Vec2__new(1.0, 2.0) }
+fn main!() -> Vec2 { Vec2(1.0, 2.0) }
 """,
         must_contain=[
             "typedef struct {",
             "double x;",
             "double y;",
             "} Vec2;",
-            "Vec2 Vec2__new(double x, double y)",
+            "Vec2 Vec2__new(_WArena* _a, double x, double y)",
         ],
     )
     check_ok(
@@ -108,10 +109,10 @@ entity Circle {
     radius!: float
     fn area!() -> float { radius * radius }
 }
-fn main!() -> float { Circle__new(2.0).radius }
+fn main!() -> float { Circle(2.0).radius }
 """,
         must_contain=[
-            "double Circle__area(Circle self)",
+            "double Circle__area(_WArena* _a, Circle self)",
             "return (self.radius * self.radius);",
         ],
     )
@@ -125,7 +126,7 @@ entity Counter {
 fn main!() -> int { 0 }
 """,
         must_contain=[
-            "void Counter__increment(Counter* self)",
+            "void Counter__increment(_WArena* _a, Counter* self)",
             "self->value = (self->value + 1);",
         ],
     )
@@ -182,6 +183,18 @@ fn sum_list!() -> int {
             "acc = (acc + x);",
         ],
     )
+    check_ok(
+        "entity operator desugar passes arena",
+        """\
+entity Vec2 {
+    x!: float
+    y!: float
+    fn add!(other: Vec2) -> Vec2 { Vec2(self.x + other.x, self.y + other.y) }
+}
+fn combine!(a: Vec2, b: Vec2) -> Vec2 { a + b }
+""",
+        must_contain=["return Vec2__add(_a, a, b);"],
+    )
 
     section("Match")
     check_ok(
@@ -204,18 +217,113 @@ fn describe!(x: int) -> int {
         ],
     )
 
-    section("String interpolation")
+    section("WStr + Arena")
     check_ok(
-        "interpolation lowers to snprintf",
+        "string interpolation uses WStr",
         'fn main!() -> int {\n'
         '    const name = 42\n'
         '    const _ = "hi {name}"\n'
         '    0\n'
         '}\n',
         must_contain=[
-            "char _s1[512];",
-            'snprintf(_s1, 512, "hi %ld", name);',
+            '_wstr_from_snprintf(_a, "hi %ld", name)',
             "#include <stdio.h>",
+            "WStr _ =",
+        ],
+    )
+    check_ok(
+        "string literal uses _wstr_from_lit",
+        'fn greet!() -> string { "hello" }\n',
+        must_contain=[
+            '_wstr_from_lit("hello", 5)',
+            "WStr greet(",
+        ],
+    )
+    check_ok(
+        "string concat uses _wstr_concat",
+        """\
+fn join!(a: string, b: string) -> string { a + b }
+""",
+        must_contain=[
+            "_wstr_concat(_a, a, b)",
+            "WStr join(",
+        ],
+    )
+    check_ok(
+        "string equality uses _wstr_eq",
+        """\
+fn same!(a: string, b: string) -> bool { a == b }
+""",
+        must_contain=["_wstr_eq(a, b)"],
+    )
+    check_ok(
+        "string .length uses _wstr_len",
+        """\
+fn slen!(s: string) -> int { s.length }
+""",
+        must_contain=["_wstr_len(s)"],
+    )
+    check_ok(
+        "string indexing uses _wstr_index",
+        """\
+fn char_at!(s: string, i: int) -> string { s[i] }
+""",
+        must_contain=["_wstr_from_char(_a, _wstr_index(s, i))"],
+    )
+    check_ok(
+        "arena setup in main",
+        """\
+fn main!() -> int { 0 }
+""",
+        must_contain=[
+            "_WArena* _a = _w_arena_new(4096);",
+            "_w_arena_free(_a);",
+        ],
+    )
+    check_ok(
+        "arena param in non-main functions",
+        """\
+fn helper!(x: int) -> int { x + 1 }
+""",
+        must_contain=["long helper(_WArena* _a, long x)"],
+    )
+    check_ok(
+        "WStr runtime is embedded",
+        """\
+fn main!() -> int { 0 }
+""",
+        must_contain=[
+            "typedef struct {",
+            "} WStr;",
+            "_wstr_from_lit",
+            "_wstr_concat",
+            "_w_arena_new",
+        ],
+    )
+    check_ok(
+        "arena uses stable blocks",
+        """\
+fn main!() -> int { 0 }
+""",
+        must_contain=[
+            "typedef struct _WArenaBlock {",
+            "_WArenaBlock* head;",
+            "_w_arena_block_new",
+        ],
+    )
+    check_ok(
+        "user fn wins over c wildcard extern",
+        """\
+import c.stdio
+fn println!(s: string) -> unit { puts(s) }
+fn main!() -> int {
+    println("ok")
+    0
+}
+""",
+        must_contain=[
+            "void println(_WArena* _a, WStr s)",
+            "println(_a, _wstr_from_lit(\"ok\", 2));",
         ],
     )
 
