@@ -417,6 +417,9 @@ class Checker:
                 self.err("trait", m.pos, f"`{m.name}` não é método da trait `{tr.name}`")
                 continue
             mi = tr.methods[m.name]
+            for p, tp in zip(m.params, mi.decl.params):
+                if p.mode == "borrow":
+                    p.mode = tp.mode
             fi = FnInfo(f"{tr.name}({h}).{m.name}", mod, m, True, mi.fixity, m.params, m.body, mi.decl.io,
                         annotated=True, pos=m.pos, impl=impl)
             fi.prim = self.fn_prim(m)

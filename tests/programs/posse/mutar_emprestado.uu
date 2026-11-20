@@ -1,0 +1,7 @@
+// error: posse 3
+fn f(x: int) -> int =
+    x = x + 1
+    x
+fn +main() -> Pending(int) io =
+    for _ <- print("{f(1)}")
+        yield 0

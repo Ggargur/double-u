@@ -1,0 +1,8 @@
+// error: posse 6
+fn incrementa(mut n: int) -> () =
+    n = n + 1
+fn +main() -> Pending(int) io =
+    var k = 2
+    incrementa(k)
+    for _ <- print("{k}")
+        yield 0

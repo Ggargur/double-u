@@ -1,0 +1,16 @@
+//> 2000000
+// maxrss-mb: 60
+// timeout: 10
+fn enche(own xs: List(int) i: int n: int) -> List(int) =
+    if i >= n then xs else enche(push(xs i) (i + 1) n)
+fn troca(own xs: List(int) i: int) -> List(int) =
+    a = at(xs i)
+    set(xs i (a + 1))
+fn +main() -> Pending(int) io =
+    var xs = enche([] 0 2000000)
+    var k = 0
+    while k < 20000
+        xs = troca(xs (k * 97))
+        k = k + 1
+    for _ <- print("{len(xs)}")
+        yield 0

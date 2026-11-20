@@ -467,7 +467,15 @@ class Codegen:
         return o
 
     def x_Name(self, e: A.Name) -> Any:
-        return self.ref_value(e.ref, self.ty(e))  # type: ignore[attr-defined]
+        ref = e.ref  # type: ignore[attr-defined]
+        if getattr(e, "move", False) and ref.kind == "local":
+            loc = self.st.locals.get(ref.target.id)
+            if loc is not None and loc.kind == "slot":
+                # move: a referência sai da ligação sem incremento
+                v = self.b.load(loc.ptr)
+                self.b.store(self.const(0), loc.ptr)
+                return v
+        return self.ref_value(ref, self.ty(e))
 
     def load_local(self, lv: LocalVar) -> tuple[Any, Type]:
         loc = self.st.locals.get(lv.id)

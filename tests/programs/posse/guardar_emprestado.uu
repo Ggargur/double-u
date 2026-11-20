@@ -1,0 +1,6 @@
+// error: posse 3
+type +Caixa = { +t: Text }
+fn embala(t: Text) -> Caixa = Caixa(t)
+fn +main() -> Pending(int) io =
+    for _ <- print(embala("x").t)
+        yield 0

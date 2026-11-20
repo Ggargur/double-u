@@ -1,0 +1,17 @@
+//> 4.0 6.0
+//> 3
+type +Vec = { +x: float  +y: float }
+impl Add(Vec) =
+    fn (a) + (b) = Vec((a.x + b.x) (a.y + b.y))
+fn integra(mut pos: Vec vel: Vec) -> () =
+    pos = pos + vel
+fn incrementa(mut n: int) -> () =
+    n = n + 1
+fn +main() -> Pending(int) io =
+    var p = Vec(1.0 2.0)
+    integra(!p Vec(3.0 4.0))
+    var k = 2
+    incrementa(!k)
+    for _ <- print("{p.x} {p.y}")
+        _ <- print("{k}")
+        yield 0

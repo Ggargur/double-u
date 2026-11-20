@@ -1,0 +1,9 @@
+// error: posse 7
+fn guarda(own xs: List(int)) -> int = len(xs)
+fn +main() -> Pending(int) io =
+    xs = [1 2 3]
+    n = guarda(xs)
+    m = n + 1
+    k = len(xs)
+    for _ <- print("{m} {k}")
+        yield 0

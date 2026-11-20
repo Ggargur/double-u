@@ -24,8 +24,9 @@ PROGRAMS = sorted(p for p in ROOT.rglob("*.uu") if not p.name.startswith("_"))
 
 def parse_expectations(src: str):
     stdout, errors, flags, exit_code = [], [], [], 0
-    global MAXRSS
+    global MAXRSS, TIMEOUT
     MAXRSS = None
+    TIMEOUT = 120
     for line in src.splitlines():
         if line.startswith("//>"):
             stdout.append(line[4:] if line.startswith("//> ") else line[3:])
@@ -33,6 +34,8 @@ def parse_expectations(src: str):
             exit_code = int(m.group(1))
         elif m := re.match(r"// error: (\S+) (\d+)", line):
             errors.append((m.group(1), int(m.group(2))))
+        elif m := re.match(r"// timeout: (\d+)", line):
+            TIMEOUT = int(m.group(1))
         elif m := re.match(r"// maxrss-mb: (\d+)", line):
             MAXRSS = int(m.group(1))
         elif m := re.match(r"// flags: (.*)", line):
@@ -41,6 +44,7 @@ def parse_expectations(src: str):
 
 
 MAXRSS: int | None = None
+TIMEOUT = 120
 
 
 def run_cli(*args: str, cwd: Path | None = None, timeout: int = 120):
@@ -56,7 +60,7 @@ def run_cli(*args: str, cwd: Path | None = None, timeout: int = 120):
 @pytest.mark.parametrize("program", PROGRAMS, ids=lambda p: str(p.relative_to(ROOT)))
 def test_program(program: Path):
     stdout, exit_code, errors, flags = parse_expectations(program.read_text("utf-8"))
-    proc = run_cli("run", *flags, str(program), cwd=program.parent)
+    proc = run_cli("run", *flags, str(program), cwd=program.parent, timeout=TIMEOUT)
     if errors:
         assert proc.returncode != 0, f"esperava erro de compilação\n{proc.stdout}{proc.stderr}"
         got = set()

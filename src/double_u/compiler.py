@@ -13,6 +13,7 @@ from .checker import Checker, ModuleInfo, generated_prelude
 from .codegen import Codegen
 from .desugar import Desugar
 from .diagnostics import CompileFailed, Diagnostics
+from .ownership import Ownership
 from .parser import parse
 
 HERE = Path(__file__).parent
@@ -47,6 +48,8 @@ def frontend(path: str, diags: Diagnostics) -> tuple[Checker, ModuleInfo]:
     ck.collect(main)
     if not diags:
         ck.check_program()
+        if not diags:
+            Ownership(ck).run()
     return ck, main
 
 

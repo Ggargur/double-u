@@ -39,7 +39,7 @@ trait +Clone(T) =
 trait +Functor(F) =
     fn +map(x: F(A) f: A -> B) -> F(B)
 trait +Monad(M) =
-    fn +pure(x: A) -> M(A)
+    fn +pure(own x: A) -> M(A)
     fn +(m: M(A)) >>= (f: A -> M(B)) -> M(B) infixl 1
 trait +Filter(F) =
     fn +filter(x: F(A) f: A -> bool) -> F(A)
@@ -163,7 +163,7 @@ fn buscaEm(es: List(#(K V)) k: K i: int) -> Maybe(V) given Eq(K) =
         #(k2 v) -> if k2 == k then Just(v) else buscaEm(es k (i + 1))
 fn +insert(own m: Map(K V) own k: K own v: V) -> Map(K V) given Eq(K) =
     Map(push(semChave(m.entries k 0 []) #(k v)))
-fn semChave(es: List(#(K V)) k: K i: int acc: List(#(K V))) -> List(#(K V)) given Eq(K) =
+fn semChave(es: List(#(K V)) k: K i: int own acc: List(#(K V))) -> List(#(K V)) given Eq(K) =
     if i >= len(es) then acc
     else match at(es i)
         #(k2 v) -> if k2 == k then semChave(es k (i + 1) acc) else semChave(es k (i + 1) push(acc #(k2 v)))
