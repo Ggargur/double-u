@@ -1,0 +1,7 @@
+// error: ambiguidade 5
+type +Vec = { +x: float  +y: float }
+fn +(v: Vec).x -> float = 0.0
+fn +main() -> Pending(int) io =
+    a = Vec(1.0 2.0).x
+    for _ <- print("{a}")
+        yield 0

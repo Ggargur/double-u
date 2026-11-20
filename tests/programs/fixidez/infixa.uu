@@ -1,0 +1,17 @@
+//> -2.0
+//> -2
+//> 1
+//> 25.0
+type +Vec = { +x: float  +y: float }
+fn +(a: Vec) cross (b: Vec) -> float = a.x * b.y - a.y * b.x
+fn +(x: float).squared -> float = x * x
+fn conta(a: Vec f: (Vec Vec) -> float c: Vec) -> int = f(a c).int
+fn um(x: float) -> int = 1
+fn +main() -> Pending(int) io =
+    a = Vec(1.0 2.0)
+    b = Vec(3.0 4.0)
+    for _ <- print("{a cross b}")
+        _ <- print("{conta(a cross b)}")
+        _ <- print("{um((a cross b))}")
+        _ <- print("{5.0.squared}")
+        yield 0

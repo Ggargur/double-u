@@ -1,0 +1,8 @@
+// error: fixidez 6
+type +Vec = { +x: float  +y: float }
+fn +(a: Vec) cross (b: Vec) -> Vec = a
+fn +(a: Vec) dot (b: Vec) -> float = a.x * b.x
+fn +main() -> Pending(int) io =
+    r = Vec(1.0 2.0) cross Vec(1.0 2.0) dot Vec(1.0 2.0)
+    for _ <- print("{r}")
+        yield 0
