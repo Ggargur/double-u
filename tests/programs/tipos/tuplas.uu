@@ -1,0 +1,10 @@
+//> 0 zero
+//> 3
+fn soma(t: #(int int)) -> int = match t
+    #(a b) -> a + b
+fn +main() -> Pending(int) io =
+    t = #(0 "zero")
+    #(n nome) = t
+    for _ <- print("{n} {nome}")
+        _ <- print("{soma(#(1 2))}")
+        yield 0

@@ -72,6 +72,7 @@ def compile_file(path: str, out: str, release: bool = False, libs: list[str] | N
                        else f"-l{lib}")
         if release:
             cmd.append("-DUU_RELEASE")
+        cmd += os.environ.get("UU_CFLAGS", "").split()
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RuntimeError(f"falha ao ligar o executável:\n{proc.stderr}")

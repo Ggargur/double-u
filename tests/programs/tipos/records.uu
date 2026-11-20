@@ -1,0 +1,15 @@
+//> 1.0 2.0
+//> 1.0 2.0
+//> 1.0 5.0
+//> 1.0 2.0
+type +Vec = { +x: float  +y: float }
+fn mostra(v: Vec) -> Text = "{v.x} {v.y}"
+fn +main() -> Pending(int) io =
+    a = Vec(1.0 2.0)
+    b = Vec(y: 2.0 x: 1.0)
+    c = a with y: 5.0
+    for _ <- print(mostra(a))
+        _ <- print(mostra(b))
+        _ <- print(mostra(c))
+        _ <- print(mostra(a))
+        yield 0

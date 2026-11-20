@@ -1,0 +1,9 @@
+// error: exaustividade 4
+type +Shape = Circle(radius: float) | Rect(w: float h: float) | Tri
+fn area(s: Shape) -> float =
+    match s
+        Circle(r) -> r
+        Tri -> 0.0
+fn +main() -> Pending(int) io =
+    for _ <- print("{area(Tri)}")
+        yield 0

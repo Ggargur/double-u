@@ -1,0 +1,5 @@
+// error: sintaxe 3
+fn +main() -> Pending(int) io =
+    t = (1 2)
+    for _ <- print("x")
+        yield 0
