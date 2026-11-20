@@ -11,6 +11,7 @@ Diretivas no topo do programa (comentários):
 from __future__ import annotations
 
 import re
+import resource
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ PROGRAMS = sorted(p for p in ROOT.rglob("*.uu") if not p.name.startswith("_"))
 
 def parse_expectations(src: str):
     stdout, errors, flags, exit_code = [], [], [], 0
+    global MAXRSS
+    MAXRSS = None
     for line in src.splitlines():
         if line.startswith("//>"):
             stdout.append(line[4:] if line.startswith("//> ") else line[3:])
@@ -30,9 +33,14 @@ def parse_expectations(src: str):
             exit_code = int(m.group(1))
         elif m := re.match(r"// error: (\S+) (\d+)", line):
             errors.append((m.group(1), int(m.group(2))))
+        elif m := re.match(r"// maxrss-mb: (\d+)", line):
+            MAXRSS = int(m.group(1))
         elif m := re.match(r"// flags: (.*)", line):
             flags += m.group(1).split()
     return stdout, exit_code, errors, flags
+
+
+MAXRSS: int | None = None
 
 
 def run_cli(*args: str, cwd: Path | None = None, timeout: int = 120):
@@ -57,6 +65,20 @@ def test_program(program: Path):
         for err in errors:
             assert err in got, f"faltou erro {err}; stderr:\n{proc.stderr}"
         return
+    if MAXRSS is not None:
+        # mede o executável já compilado, isolado
+        exe = program.parent / f".{program.stem}.bin"
+        try:
+            assert run_cli("build", *flags, str(program), "-o", str(exe)).returncode == 0
+            lim = MAXRSS * 1024 * 1024
+
+            def cap() -> None:
+                resource.setrlimit(resource.RLIMIT_AS, (lim, lim))
+
+            r = subprocess.run([str(exe)], capture_output=True, timeout=120, preexec_fn=cap)
+            assert r.returncode == exit_code, f"estourou {MAXRSS} MB de memória? {r.stderr!r}"
+        finally:
+            exe.unlink(missing_ok=True)
     assert proc.stderr == "" or proc.returncode == exit_code, proc.stderr
     assert proc.stdout.splitlines() == stdout, proc.stderr
     assert proc.returncode == exit_code, proc.stderr

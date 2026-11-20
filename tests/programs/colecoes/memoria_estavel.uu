@@ -1,0 +1,11 @@
+//> 3000000
+// maxrss-mb: 40
+fn laco(i: int n: int acc: int) -> int =
+    if i >= n then acc
+    else
+        xs = [i i i]
+        ys = push(xs i)
+        laco((i + 1) n (acc + len(ys) - 3))
+fn +main() -> Pending(int) io =
+    for _ <- print("{laco(0 3000000 0)}")
+        yield 0

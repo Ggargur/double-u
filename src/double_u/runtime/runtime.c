@@ -69,6 +69,10 @@ static void obj_free(Obj *o) {
     case K_PEND:
         pending_free((Pending *)o);
         return;
+    case K_LIST:
+        if (o->tag)
+            for (uint32_t i = 0; i < o->n; i++) uu_dec(o->f[i]);
+        break;
     default:
         break;
     }
@@ -418,4 +422,195 @@ int uu_run(W main_pending) {
     int code = (int)mp->value;
     fflush(stdout);
     return code;
+}
+
+// ------------------------------------------------------------------ List
+// K_LIST: n = tamanho, aux = capacidade, tag = elementos são ponteiros
+static W list_alloc(W cap, W isptr) {
+    if (cap < 4) cap = 4;
+    W l = uu_alloc(K_LIST, isptr, cap, 0);
+    ((Obj *)l)->aux = (uint32_t)cap;
+    ((Obj *)l)->n = 0;
+    return l;
+}
+
+W uu_list_new(W n, W isptr) {
+    W l = list_alloc(n, isptr);
+    ((Obj *)l)->n = (uint32_t)n;
+    return l;
+}
+
+W uu_list_len(W xs) { W n = ((Obj *)xs)->n; uu_dec(xs); return n; }
+
+static W just(W x, W isptr) {
+    W o = uu_alloc(K_DATA, 0, 1, isptr ? 1 : 0);
+    ((Obj *)o)->f[0] = x;
+    return o;
+}
+
+W uu_list_get(W xs, W i) {
+    Obj *o = (Obj *)xs;
+    W r;
+    if (i < 0 || i >= (W)o->n) r = uu_nullary(1);
+    else {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        r = just(x, o->tag);
+    }
+    uu_dec(xs);
+    return r;
+}
+
+W uu_list_at(W xs, W i) {
+    Obj *o = (Obj *)xs;
+    if (i < 0 || i >= (W)o->n) uu_panic_c("índice fora da lista");
+    W x = o->f[i];
+    if (o->tag) uu_inc(x);
+    uu_dec(xs);
+    return x;
+}
+
+static W list_unique(W xs, W extra) {
+    // garante dono único com espaço para mais `extra` elementos (reaproveita o buffer)
+    Obj *o = (Obj *)xs;
+    if (o->rc == 1) {
+        if (o->n + extra > o->aux) {
+            W cap = (W)o->aux * 2;
+            if (cap < (W)(o->n + extra)) cap = o->n + extra;
+            o = realloc(o, sizeof(Obj) + (size_t)cap * sizeof(W));
+            o->aux = (uint32_t)cap;
+        }
+        return (W)o;
+    }
+    W l = list_alloc(o->n + extra, o->tag);
+    Obj *d = (Obj *)l;
+    for (uint32_t i = 0; i < o->n; i++) {
+        d->f[i] = o->f[i];
+        if (o->tag) uu_inc(o->f[i]);
+    }
+    d->n = o->n;
+    uu_dec(xs);
+    return l;
+}
+
+W uu_list_push(W xs, W x) {
+    xs = list_unique(xs, 1);
+    Obj *o = (Obj *)xs;
+    o->f[o->n++] = x;
+    return xs;
+}
+
+W uu_list_set(W xs, W i, W x) {
+    xs = list_unique(xs, 0);
+    Obj *o = (Obj *)xs;
+    if (i < 0 || i >= (W)o->n) uu_panic_c("índice fora da lista");
+    if (o->tag) uu_dec(o->f[i]);
+    o->f[i] = x;
+    return xs;
+}
+
+W uu_list_concat(W a, W b) {
+    Obj *ob = (Obj *)b;
+    a = list_unique(a, ob->n);
+    Obj *oa = (Obj *)a;
+    for (uint32_t i = 0; i < ob->n; i++) {
+        oa->f[oa->n++] = ob->f[i];
+        if (ob->tag) uu_inc(ob->f[i]);
+    }
+    uu_dec(b);
+    return a;
+}
+
+W uu_list_fold(W xs, W acc, W f) {
+    Obj *o = (Obj *)xs;
+    for (uint32_t i = 0; i < o->n; i++) {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        uu_inc(f);
+        acc = uu_apply2(f, acc, x);
+    }
+    uu_dec(f);
+    uu_dec(xs);
+    return acc;
+}
+
+W uu_list_each(W xs, W f) {
+    Obj *o = (Obj *)xs;
+    for (uint32_t i = 0; i < o->n; i++) {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        uu_inc(f);
+        uu_apply1(f, x);
+    }
+    uu_dec(f);
+    uu_dec(xs);
+    return 0;
+}
+
+W uu_list_map(W xs, W f, W outptr) {
+    Obj *o = (Obj *)xs;
+    W l = list_alloc(o->n, outptr);
+    for (uint32_t i = 0; i < o->n; i++) {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        uu_inc(f);
+        ((Obj *)l)->f[i] = uu_apply1(f, x);
+        ((Obj *)l)->n = i + 1;
+    }
+    uu_dec(f);
+    uu_dec(xs);
+    return l;
+}
+
+W uu_list_filter(W xs, W f) {
+    Obj *o = (Obj *)xs;
+    W l = list_alloc(o->n, o->tag);
+    Obj *d = (Obj *)l;
+    for (uint32_t i = 0; i < o->n; i++) {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        uu_inc(f);
+        if (uu_apply1(f, x)) {
+            if (o->tag) uu_inc(x);
+            d->f[d->n++] = x;
+        }
+    }
+    uu_dec(f);
+    uu_dec(xs);
+    return l;
+}
+
+W uu_list_bind(W xs, W f, W outptr) {
+    Obj *o = (Obj *)xs;
+    W l = list_alloc(o->n, outptr);
+    for (uint32_t i = 0; i < o->n; i++) {
+        W x = o->f[i];
+        if (o->tag) uu_inc(x);
+        uu_inc(f);
+        l = uu_list_concat(l, uu_apply1(f, x));
+    }
+    uu_dec(f);
+    uu_dec(xs);
+    return l;
+}
+
+W uu_list_pure(W x, W isptr) {
+    W l = list_alloc(1, isptr);
+    ((Obj *)l)->f[0] = x;
+    ((Obj *)l)->n = 1;
+    return l;
+}
+
+W uu_list_range(W a, W b) {
+    W n = b > a ? b - a : 0;
+    W l = list_alloc(n, 0);
+    for (W i = 0; i < n; i++) ((Obj *)l)->f[i] = a + i;
+    ((Obj *)l)->n = (uint32_t)n;
+    return l;
+}
+
+W uu_text_len_prim(W t) {
+    W n = (W)utf8_len(uu_text_ptr(t), (size_t)uu_text_len(t));
+    uu_dec(t);
+    return n;
 }

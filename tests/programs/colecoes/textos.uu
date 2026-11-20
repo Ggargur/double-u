@@ -1,0 +1,12 @@
+//> abc
+//> uma frase bem mais longa que vinte e três bytes, com acentuação
+//> true
+//> 63
+fn +main() -> Pending(int) io =
+    curto = "abc"
+    longo = "uma frase bem mais longa " ++ "que vinte e três bytes, com acentuação"
+    for _ <- print(curto)
+        _ <- print(longo)
+        _ <- print("{"ab" ++ "c" == curto}")
+        _ <- print("{longo.length}")
+        yield 0

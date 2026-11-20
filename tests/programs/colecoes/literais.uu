@@ -1,0 +1,18 @@
+//> [1 2 3]
+//> 3
+//> {a: 1  b: 2}
+//> Just(2)
+//> Nothing
+//> [1 2 3 4]
+//> true
+fn +main() -> Pending(int) io =
+    xs = [1 2 3]
+    m = {"a": 1  "b": 2}
+    for _ <- print("{xs}")
+        _ <- print("{len(xs)}")
+        _ <- print("{m}")
+        _ <- print("{lookup("b" m)}")
+        _ <- print("{lookup("z" m)}")
+        _ <- print("{push(xs 4)}")
+        _ <- print("{[1 2] == [1 2]}")
+        yield 0

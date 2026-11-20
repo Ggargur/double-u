@@ -253,7 +253,7 @@ class Checker:
         mod.is_prelude = True
         for n in NUM_TYPES + ["bool", "()"]:
             self.builtin_type(n, 0, mod)
-        for n, k in [("Text", 0), ("List", 1), ("Map", 2), ("Pending", 1), ("Gen", 1), ("Lazy", 1)]:
+        for n, k in [("Text", 0), ("List", 1), ("Pending", 1), ("Gen", 1), ("Lazy", 1)]:
             self.builtin_type(n, k, mod)
 
     def collect(self, mod: ModuleInfo) -> None:
@@ -1217,7 +1217,8 @@ class Checker:
             self.unify_at(k, self.expr(a, k), a.pos)
             self.unify_at(v, self.expr(b, v), b.pos)
         self.wanted.append(("Eq", k, e.pos))
-        self.wanted.append(("Hash", k, e.pos))
+        ent = self.prelude.values.get("Map") if self.prelude else None
+        e.ctor = ent  # type: ignore[attr-defined]
         return TCon("Map", [k, v])
 
     def e_With(self, e: A.With, expected: Type | None) -> Type:

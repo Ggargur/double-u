@@ -829,6 +829,33 @@ class Codegen:
         self.b, self.st = saved
         return clo
 
+    def x_ListLit(self, e: A.ListLit) -> Any:
+        t = self.ty(e)
+        assert isinstance(t, TCon)
+        el = t.args[0]
+        lst = self.call_rt("uu_list_new", self.const(len(e.items)), self.const(1 if is_heap(el) else 0))
+        slot = self.temp(lst, t)
+        for i, x in enumerate(e.items):
+            v = self.expr(x)
+            self.b.store(v, self.field_ptr(self.b.load(slot), i))
+        self.st.scopes[-1].remove((slot, t))
+        return self.b.load(slot)
+
+    def x_MapLit(self, e: A.MapLit) -> Any:
+        t = self.ty(e)
+        assert isinstance(t, TCon)
+        kt, vt = t.args
+        pt = TCon("#", [kt, vt])
+        lst = self.call_rt("uu_list_new", self.const(len(e.pairs)), self.const(1))
+        lt = TCon("List", [pt])
+        slot = self.temp(lst, lt)
+        for i, (k, v) in enumerate(e.pairs):
+            kv, vv = self.expr(k), self.expr(v)
+            pair = self.alloc_data(0, [kv, vv], [kt, vt])
+            self.b.store(pair, self.field_ptr(self.b.load(slot), i))
+        self.st.scopes[-1].remove((slot, lt))
+        return self.alloc_data(0, [self.b.load(slot)], [lt])
+
     def x_LazyE(self, e: A.LazyE) -> Any:
         raise CodegenError("lazy ainda não suportado")
 
@@ -964,7 +991,17 @@ class Codegen:
             else:
                 b.ret(self.call_rt("uu_fmt_i64", args[0], args[1]))
             return
-        if name in ("fmt_text", "text_concat", "text_eq", "req_print"):
+        if name in ("list_map", "list_bind", "list_pure"):
+            rt = prune(ft.ret)
+            assert isinstance(rt, TCon)
+            b.ret(self.call_rt("uu_" + name, *args, self.const(1 if is_heap(rt.args[0]) else 0)))
+            return
+        if name == "text_len":
+            b.ret(self.call_rt("uu_text_len_prim", *args))
+            return
+        if name in ("fmt_text", "text_concat", "text_eq", "req_print", "list_len", "list_get", "list_at",
+                    "list_push", "list_set", "list_concat", "list_fold", "list_each", "list_filter",
+                    "list_range"):
             b.ret(self.call_rt("uu_" + name, *args))
             return
         if name == "panic":

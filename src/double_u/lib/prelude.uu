@@ -112,3 +112,65 @@ impl Eq(()) =
     fn (a) == (b) = true
 impl Clone(Text) =
     fn (x).copy = x
+
+// ---------------------------------------------------------------- List
+fn +len(xs: List(T)) -> int = @prim("list_len")
+fn +get(xs: List(T) i: int) -> Maybe(T) = @prim("list_get")
+fn +at(xs: List(T) i: int) -> T = @prim("list_at")
+fn +push(own xs: List(T) own x: T) -> List(T) = @prim("list_push")
+fn +set(own xs: List(T) i: int own x: T) -> List(T) = @prim("list_set")
+fn +fold(xs: List(T) init: A f: (A T) -> A) -> A = @prim("list_fold")
+fn +range(a: int b: int) -> List(int) = @prim("list_range")
+fn +(t: Text).length -> int = @prim("text_len")
+
+impl Append(List(T)) =
+    fn (a) ++ (b) = @prim("list_concat")
+impl Functor(List) =
+    fn map(xs f) = @prim("list_map")
+impl Monad(List) =
+    fn pure(x) = @prim("list_pure")
+    fn (m) >>= (f) = @prim("list_bind")
+impl Filter(List) =
+    fn filter(xs f) = @prim("list_filter")
+impl Each(List) =
+    fn each(xs f) = @prim("list_each")
+impl Format(List(T)) given Format(T) =
+    fn format(xs spec) = fmtText(("[" ++ juntaFmt(xs 0 "") ++ "]") spec)
+impl Eq(List(T)) given Eq(T) =
+    fn (a) == (b) = len(a) == len(b) && listaIgual(a b 0)
+impl Clone(List(T)) =
+    fn (x).copy = x
+
+fn juntaFmt(xs: List(T) i: int acc: Text) -> Text given Format(T) =
+    if i >= len(xs) then acc
+    else if i == 0 then juntaFmt(xs (i + 1) "{at(xs i)}")
+    else juntaFmt(xs (i + 1) (acc ++ " {at(xs i)}"))
+
+fn listaIgual(a: List(T) b: List(T) i: int) -> bool given Eq(T) =
+    if i >= len(a) then true
+    else if at(a i) == at(b i) then listaIgual(a b (i + 1))
+    else false
+
+fn fmtText(t: Text spec: Spec) -> Text = @prim("fmt_text")
+
+// ---------------------------------------------------------------- Map (lista de associação)
+type +Map(K V) = { entries: List(#(K V)) }
+
+fn +lookup(k: K m: Map(K V)) -> Maybe(V) given Eq(K) = buscaEm(m.entries k 0)
+fn buscaEm(es: List(#(K V)) k: K i: int) -> Maybe(V) given Eq(K) =
+    if i >= len(es) then Nothing
+    else match at(es i)
+        #(k2 v) -> if k2 == k then Just(v) else buscaEm(es k (i + 1))
+fn +insert(own m: Map(K V) own k: K own v: V) -> Map(K V) given Eq(K) =
+    Map(push(semChave(m.entries k 0 []) #(k v)))
+fn semChave(es: List(#(K V)) k: K i: int acc: List(#(K V))) -> List(#(K V)) given Eq(K) =
+    if i >= len(es) then acc
+    else match at(es i)
+        #(k2 v) -> if k2 == k then semChave(es k (i + 1) acc) else semChave(es k (i + 1) push(acc #(k2 v)))
+fn +size(m: Map(K V)) -> int = len(m.entries)
+impl Format(Map(K V)) given Format(K) Format(V) =
+    fn format(m spec) = fmtText(("{{" ++ fmtPares(m.entries 0 "") ++ "}") spec)
+fn fmtPares(es: List(#(K V)) i: int acc: Text) -> Text given Format(K) Format(V) =
+    if i >= len(es) then acc
+    else match at(es i)
+        #(k v) -> fmtPares(es (i + 1) (if i == 0 then "{k}: {v}" else acc ++ "  {k}: {v}"))

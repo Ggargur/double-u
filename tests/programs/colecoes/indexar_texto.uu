@@ -1,0 +1,6 @@
+// error: sintaxe 4
+fn +main() -> Pending(int) io =
+    t = "abc"
+    c = t[0]
+    for _ <- print("x")
+        yield 0
