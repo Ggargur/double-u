@@ -1,0 +1,14 @@
+//> 5.0
+//> 14
+//> [3 4 5]
+type +Vec = { +x: float  +y: float }
+fn distancia(a: Vec b: Vec) -> float = (b.x - a.x) + (b.y - a.y)
+fn soma(a: int b: int) -> int = a + b
+fn +main() -> Pending(int) io =
+    a = Vec(0.0 0.0)
+    d = distancia(a _)
+    dobra = (_ * 2)
+    for _ <- print("{d(Vec(2.0 3.0))}")
+        _ <- print("{dobra(7)}")
+        _ <- print("{map([1 2 3] soma(2 _))}")
+        yield 0

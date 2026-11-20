@@ -1,0 +1,7 @@
+// error: posse 5
+fn +main() -> Pending(int) io =
+    xs = [1 2 3]
+    f = () => len(xs)
+    n = len(xs)
+    for _ <- print("{n} {f()}")
+        yield 0

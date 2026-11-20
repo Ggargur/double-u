@@ -1,0 +1,14 @@
+//> 6
+//> 7
+fn criaSomador(own xs: List(int)) -> int -> int =
+    total = fold(xs 0 (a b) => a + b)
+    n => n + total + len(xs) - 3
+fn criaContador() -> () -> int =
+    lista = [1 2 3 4 5 6 7]
+    () => len(lista)
+fn +main() -> Pending(int) io =
+    f = criaSomador([1 2 3])
+    g = criaContador()
+    for _ <- print("{f(0)}")
+        _ <- print("{g()}")
+        yield 0

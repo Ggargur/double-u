@@ -334,6 +334,8 @@ class Parser:
             ret = self.type_(allow_io)
             io = allow_io and bool(self.accept("KW", "io"))
             params = t.items if isinstance(t, A.TTuple) and getattr(t, "_paren", False) else [t]
+            if isinstance(t, A.TName) and t.name == "()" and not t.args:
+                params = []
             return A.TFunc(t.pos, params, ret, io)
         return t
 

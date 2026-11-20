@@ -1,0 +1,5 @@
+// error: sintaxe 3
+fn +main() -> Pending(int) io =
+    ys = map(x => x * 2 [1 2 3])
+    for _ <- print("{ys}")
+        yield 0

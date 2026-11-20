@@ -1,0 +1,7 @@
+//> 10
+//> [2 4 6]
+fn +main() -> Pending(int) io =
+    xs = [1 2 3 4]
+    for _ <- print("{fold(xs 0 (acc x) => acc + x)}")
+        _ <- print("{map([1 2 3] x => x * 2)}")
+        yield 0
