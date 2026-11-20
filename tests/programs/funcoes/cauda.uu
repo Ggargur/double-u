@@ -1,0 +1,12 @@
+//> 10000000
+//> true
+fn conta(n: int acc: int) -> int =
+    if n == 0 then acc else @tail conta((n - 1) (acc + 1))
+fn par(n: int) -> bool =
+    if n == 0 then true else impar((n - 1))
+fn impar(n: int) -> bool =
+    if n == 0 then false else par((n - 1))
+fn +main() -> Pending(int) io =
+    for _ <- print("{conta(10000000 0)}")
+        _ <- print("{par(10000000)}")
+        yield 0

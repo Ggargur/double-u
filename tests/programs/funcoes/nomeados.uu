@@ -1,0 +1,7 @@
+//> 7
+//> -3
+fn sub(x: int y: int) -> int = x - y
+fn +main() -> Pending(int) io =
+    for _ <- print("{sub(y: 3 x: 10)}")
+        _ <- print("{sub(x: 0 y: 3)}")
+        yield 0

@@ -1,0 +1,6 @@
+// error: cauda 3
+fn f(n: int) -> int =
+    1 + @tail f((n - 1))
+fn +main() -> Pending(int) io =
+    for _ <- print("{f(1)}")
+        yield 0

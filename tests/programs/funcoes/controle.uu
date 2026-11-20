@@ -1,0 +1,23 @@
+//> crítico
+//> 0
+//> 7
+//> 10
+fn dano(crit: bool blocked: bool base: int) -> int =
+    if crit
+        base * 2
+    else if blocked
+        0
+    else
+        base
+fn rotulo(n: int) -> Text = if n > 10 then "crítico" else "normal"
+fn +energia(m: int v: int) -> int =
+    cinetica + extra
+  where
+    cinetica = m * v
+    extra = 1
+fn +main() -> Pending(int) io =
+    for _ <- print(rotulo(dano(true false 6)))
+        _ <- print("{dano(false true 5)}")
+        _ <- print("{energia(2 3)}")
+        _ <- print("{dano(false false 10)}")
+        yield 0

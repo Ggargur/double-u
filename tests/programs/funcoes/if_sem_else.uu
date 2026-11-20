@@ -1,0 +1,7 @@
+// error: tipo 3
+fn f(c: bool) -> int =
+    if c then 1
+    2
+fn +main() -> Pending(int) io =
+    for _ <- print("{f(true)}")
+        yield 0

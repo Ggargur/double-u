@@ -1,0 +1,7 @@
+// error: aridade 5
+fn sub(x: int y: int) -> int = x - y
+fn +main() -> Pending(int) io =
+    a = 1
+    b = sub(a)
+    for _ <- print("{b}")
+        yield 0

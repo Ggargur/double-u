@@ -1,0 +1,5 @@
+// error: sintaxe 4
+fn f(a: int b: int) -> int = a + b
+fn +main() -> Pending(int) io =
+    for _ <- print("{f(1 + 2 3)}")
+        yield 0

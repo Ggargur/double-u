@@ -1,0 +1,7 @@
+//> 6
+//> -1
+fn f(a: int b: int) -> int = a + b
+fn +main() -> Pending(int) io =
+    for _ <- print("{f((1 + 2) 3)}")
+        _ <- print("{f(-1 0)}")
+        yield 0

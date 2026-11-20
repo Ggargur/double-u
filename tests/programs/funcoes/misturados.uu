@@ -1,0 +1,5 @@
+// error: argumentos 4
+fn sub(x: int y: int) -> int = x - y
+fn +main() -> Pending(int) io =
+    for _ <- print("{sub(1 y: 3)}")
+        yield 0
