@@ -1,0 +1,15 @@
+//> 7
+//> 9
+//> 2
+//> 1
+//> 2.5
+//> true false true
+fn +main() -> Pending(int) io =
+    for _ <- print("{1 + 2 * 3}")
+        _ <- print("{(1 + 2) * 3}")
+        _ <- print("{10 - 5 - 3}")
+        _ <- print("{7 % 3}")
+        _ <- print("{5.0 / 2.0}")
+        _ <- print("{1 < 2} {3 == 4} {2 >= 2}")
+        yield 2 ** 3 - 8 + print_last()
+fn print_last() -> int = 0

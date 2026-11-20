@@ -1,0 +1,7 @@
+//> 10
+/// `//` não é operador: o resto da linha é comentário.
+fn +main() -> Pending(int) io =
+    x = 10 // 3
+    /// doc solta também é ignorada
+    for _ <- print("{x}")
+        yield 0

@@ -75,6 +75,7 @@ class FnState:
     entry: Any = None
     ret_ty: Type | None = None
     lam: A.Lambda | None = None
+    allocas: Any = None
 
 
 class Codegen:
@@ -191,16 +192,14 @@ class Codegen:
 
     def gen_body(self, fi: FnInfo, f: ir.Function, sub: dict[int, Type], ft: Type) -> None:
         saved = (self.b, self.st)
-        self.st = FnState(f, sub, scopes=[[]])
-        bb = f.append_basic_block("entry")
-        self.b = ir.IRBuilder(bb)
+        self.start_fn(f, FnState(f, sub, scopes=[[]]))
         self.st.ret_ty = ft.ret if isinstance(ft, TFn) else ft
         for p, arg, pt in zip(fi.params, f.args, ft.params if isinstance(ft, TFn) else []):
             lv: LocalVar = p.local  # type: ignore[attr-defined]
             if p.mode == "mut":
                 self.st.locals[lv.id] = Local("ref", arg, pt, owned=False)
             else:
-                slot = self.b.alloca(I64, name=p.name)
+                slot = self.new_slot(p.name)
                 self.b.store(arg, slot)
                 self.st.locals[lv.id] = Local("slot", slot, pt)
                 self.st.scopes[-1].append((slot, pt))
@@ -209,6 +208,7 @@ class Codegen:
         else:
             assert fi.body is not None
             self.tail(fi.body)
+        self.finish_fn()
         self.b, self.st = saved
 
     # ------------------------------------------------------------------ retorno / cauda
@@ -282,12 +282,19 @@ class Codegen:
                 self.dec(self.b.load(slot), t)
 
     def new_slot(self, name: str = "") -> Any:
-        # allocas sempre no bloco de entrada
-        entry = self.st.fn.entry_basic_block
-        b = ir.IRBuilder(entry)
-        if entry.instructions:
-            b.position_before(entry.instructions[0])
+        # allocas sempre no bloco de entrada (que salta para o corpo no fim)
+        b = ir.IRBuilder(self.st.allocas)
         return b.alloca(I64, name=name)
+
+    def start_fn(self, f: ir.Function, st: "FnState") -> None:
+        st.allocas = f.append_basic_block("allocas")
+        body = f.append_basic_block("body")
+        self.st = st
+        self.b = ir.IRBuilder(body)
+
+    def finish_fn(self) -> None:
+        b = ir.IRBuilder(self.st.allocas)
+        b.branch(self.st.fn.basic_blocks[1])
 
     def bind_local(self, lv: LocalVar, v: Any, t: Type) -> None:
         slot = self.new_slot(lv.name)
@@ -498,10 +505,10 @@ class Codegen:
             w = ir.Function(self.mod, ir.FunctionType(I64, [I64] * (n + 1)), name=self.name("clo"))
             w.calling_convention = "tailcc"
             saved = (self.b, self.st)
-            self.b = ir.IRBuilder(w.append_basic_block("entry"))
-            self.st = FnState(w, {}, scopes=[[]])
+            self.start_fn(w, FnState(w, {}, scopes=[[]]))
             r = body(list(w.args[1:]))
             self.b.ret(r)
+            self.finish_fn()
             self.b, self.st = saved
             sty = ir.LiteralStructType([I64, I32, I32, I32, I32, I64, I64])
             g = ir.GlobalVariable(self.mod, sty, name=self.name("cloobj"))
@@ -803,8 +810,7 @@ class Codegen:
         saved = (self.b, self.st)
         st = FnState(lf, self.st.sub, scopes=[[]], lam=e)
         st.env = lf.args[0]
-        self.b = ir.IRBuilder(lf.append_basic_block("entry"))
-        self.st = st
+        self.start_fn(lf, st)
         for i, (lv, kind) in enumerate(layout):
             st.locals[lv.id] = Local(kind, i + 1, saved[1].locals[lv.id].ty, owned=False)
         for p, arg, pt in zip(e.params, lf.args[1:], ft.params):
@@ -812,11 +818,12 @@ class Codegen:
             if p.mode == "mut":
                 st.locals[lv.id] = Local("ref", arg, pt, owned=False)
             else:
-                slot = self.b.alloca(I64)
+                slot = self.new_slot(p.name)
                 self.b.store(arg, slot)
                 st.locals[lv.id] = Local("slot", slot, pt)
                 st.scopes[-1].append((slot, pt))
         self.tail(e.body)
+        self.finish_fn()
         self.b, self.st = saved
         return clo
 

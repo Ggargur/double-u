@@ -1,0 +1,11 @@
+//> total: 30
+//> olá, mundo! {chaves}
+//> 1 + 1 = 2
+fn +main() -> Pending(int) io =
+    preco = 10
+    qtd = 3
+    nome = "mundo"
+    for _ <- print("total: {preco * qtd}")
+        _ <- print("olá, {nome}! {{chaves}}")
+        _ <- print("1 + 1 = {1 + 1}")
+        yield 0
