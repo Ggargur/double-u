@@ -36,6 +36,9 @@ void uu_dec(W x) {
 
 W uu_rc(W x) { return ((Obj *)x)->rc; }
 
+static W just(W x, W isptr);
+static W list_alloc(W cap, W isptr);
+W uu_list_push(W xs, W x);
 static Obj nullaries[256];
 W uu_nullary(W tag) {
     Obj *o = &nullaries[tag & 255];
@@ -58,6 +61,8 @@ typedef struct {
 } Pending;
 
 static void pending_free(Pending *p);
+static void gen_free(Obj *o);
+static void lazy_free(Obj *o);
 
 static void obj_free(Obj *o) {
     switch (o->kind) {
@@ -69,6 +74,12 @@ static void obj_free(Obj *o) {
     case K_PEND:
         pending_free((Pending *)o);
         return;
+    case K_GEN:
+        gen_free(o);
+        break;
+    case K_LAZY:
+        lazy_free(o);
+        break;
     case K_LIST:
         if (o->tag)
             for (uint32_t i = 0; i < o->n; i++) uu_dec(o->f[i]);
@@ -625,4 +636,157 @@ W uu_list_each_mut(W slot, W f) {
     }
     uu_dec(f);
     return 0;
+}
+
+// ------------------------------------------------------------------ Gen
+// K_GEN: f[0] = handle da coroutine, f[1] = tem valor, f[2] = valor; tag = valor é ponteiro
+void uu_coro_resume(W h);
+W uu_coro_done(W h);
+void uu_coro_destroy(W h);
+
+W uu_gen_new(W isptr) {
+    W g = uu_alloc(K_GEN, isptr, 3, 0);
+    Obj *o = (Obj *)g;
+    o->f[0] = o->f[1] = o->f[2] = 0;
+    return g;
+}
+
+void uu_gen_set_handle(W g, W h) { ((Obj *)g)->f[0] = h; }
+
+void uu_gen_yield(W g, W v) {
+    Obj *o = (Obj *)g;
+    o->f[1] = 1;
+    o->f[2] = v;
+}
+
+// avança o generator; 1 se produziu um valor
+W uu_gen_step(W g) {
+    Obj *o = (Obj *)g;
+    if (o->f[1]) return 1;
+    if (!o->f[0] || uu_coro_done(o->f[0])) return 0;
+    uu_coro_resume(o->f[0]);
+    return o->f[1];
+}
+
+W uu_gen_value(W g) {
+    Obj *o = (Obj *)g;
+    o->f[1] = 0;
+    return o->f[2];
+}
+
+static void gen_free(Obj *o) {
+    if (o->f[1] && o->tag) uu_dec(o->f[2]);
+    if (o->f[0]) uu_coro_destroy(o->f[0]);
+}
+
+W uu_gen_next(W g) {
+    W r = uu_gen_step(g) ? just(uu_gen_value(g), ((Obj *)g)->tag) : uu_nullary(1);
+    uu_dec(g);
+    return r;
+}
+
+W uu_gen_take(W g, W n) {
+    W isptr = ((Obj *)g)->tag;
+    W l = list_alloc(n > 0 && n < 1024 ? n : 4, isptr);
+    for (W i = 0; i < n && uu_gen_step(g); i++) l = uu_list_push(l, uu_gen_value(g));
+    uu_dec(g);
+    return l;
+}
+
+W uu_gen_to_list(W g) { return uu_gen_take(g, INT64_MAX); }
+
+W uu_gen_each(W g, W f) {
+    while (uu_gen_step(g)) {
+        uu_inc(f);
+        uu_apply1(f, uu_gen_value(g));
+    }
+    uu_dec(f);
+    uu_dec(g);
+    return 0;
+}
+
+// ------------------------------------------------------------------ Lazy
+// K_LAZY: f[0] = closure (ou 0), f[1] = avaliado, f[2] = valor; tag = valor é ponteiro
+W uu_lazy_new(W clo, W isptr) {
+    W l = uu_alloc(K_LAZY, isptr, 3, 0);
+    Obj *o = (Obj *)l;
+    o->f[0] = clo;
+    o->f[1] = 0;
+    o->f[2] = 0;
+    return l;
+}
+
+W uu_lazy_force(W l) {
+    Obj *o = (Obj *)l;
+    if (!o->f[1]) {
+        W clo = o->f[0];
+        o->f[0] = 0;
+        o->f[2] = uu_apply0(clo);
+        o->f[1] = 1;
+    }
+    W v = o->f[2];
+    if (o->tag) uu_inc(v);
+    uu_dec(l);
+    return v;
+}
+
+static void lazy_free(Obj *o) {
+    if (o->f[1]) { if (o->tag) uu_dec(o->f[2]); }
+    else if (o->f[0]) uu_dec(o->f[0]);
+}
+
+// ------------------------------------------------------------------ Text: chars, bytes, graphemes
+static size_t cp_len(unsigned char c) {
+    if (c < 0x80) return 1;
+    if ((c >> 5) == 6) return 2;
+    if ((c >> 4) == 14) return 3;
+    return 4;
+}
+
+static uint32_t cp_at(const unsigned char *s, size_t n) {
+    if (n == 1) return s[0];
+    if (n == 2) return ((s[0] & 31u) << 6) | (s[1] & 63u);
+    if (n == 3) return ((s[0] & 15u) << 12) | ((s[1] & 63u) << 6) | (s[2] & 63u);
+    return ((s[0] & 7u) << 18) | ((s[1] & 63u) << 12) | ((s[2] & 63u) << 6) | (s[3] & 63u);
+}
+
+static int extends_cluster(uint32_t c) {
+    return (c >= 0x300 && c <= 0x36F) || (c >= 0x1AB0 && c <= 0x1AFF) || (c >= 0x1DC0 && c <= 0x1DFF) ||
+           (c >= 0x20D0 && c <= 0x20FF) || (c >= 0xFE20 && c <= 0xFE2F) || (c >= 0xFE00 && c <= 0xFE0F) ||
+           c == 0x200D || (c >= 0x1F3FB && c <= 0x1F3FF) || (c >= 0xE0020 && c <= 0xE007F);
+}
+
+static W split_text(W t, int graphemes) {
+    const unsigned char *s = (const unsigned char *)uu_text_ptr(t);
+    size_t n = (size_t)uu_text_len(t), i = 0;
+    W l = list_alloc(4, 1);
+    int after_zwj = 0;
+    while (i < n) {
+        size_t start = i;
+        size_t k = cp_len(s[i]);
+        after_zwj = cp_at(s + i, k) == 0x200D;
+        i += k;
+        while (graphemes && i < n) {
+            size_t k2 = cp_len(s[i]);
+            uint32_t c = cp_at(s + i, k2);
+            if (!extends_cluster(c) && !after_zwj) break;
+            after_zwj = c == 0x200D;
+            i += k2;
+        }
+        l = uu_list_push(l, uu_text_new((const char *)s + start, i - start));
+    }
+    uu_dec(t);
+    return l;
+}
+
+W uu_text_chars(W t) { return split_text(t, 0); }
+W uu_text_graphemes(W t) { return split_text(t, 1); }
+
+W uu_text_bytes(W t) {
+    size_t n = (size_t)uu_text_len(t);
+    W l = list_alloc((W)n, 0);
+    for (size_t i = 0; i < n; i++) ((Obj *)l)->f[i] = (unsigned char)uu_text_ptr(t)[i];
+    ((Obj *)l)->n = (uint32_t)n;
+    uu_dec(t);
+    return l;
 }

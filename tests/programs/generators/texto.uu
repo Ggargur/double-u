@@ -1,0 +1,9 @@
+//> 2
+//> 1
+//> 3
+fn +main() -> Pending(int) io =
+    t = "é"
+    for _ <- print("{len(toList(t.chars))}")
+        _ <- print("{len(toList(t.graphemes))}")
+        _ <- print("{len(toList(t.bytes))}")
+        yield 0

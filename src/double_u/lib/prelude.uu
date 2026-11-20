@@ -179,3 +179,47 @@ trait +EachMut(S) =
     fn +eachMut(mut s: S(A) f: A -> ()) -> ()
 impl EachMut(List) =
     fn eachMut(xs f) = @prim("list_each_mut")
+
+// ---------------------------------------------------------------- Gen (generators)
+fn +take(own g: Gen(T) n: int) -> List(T) = @prim("gen_take")
+fn +toList(own g: Gen(T)) -> List(T) = @prim("gen_to_list")
+fn +next(g: Gen(T)) -> Maybe(T) = @prim("gen_next")
+fn +gen(own xs: List(T)) -> Gen(T) =
+    for x <- xs
+        yield x
+fn mapGen(own g: Gen(A) own f: A -> B) -> Gen(B) =
+    for x <- g
+        yield f(x)
+fn filterGen(own g: Gen(A) own f: A -> bool) -> Gen(A) =
+    for x <- g
+        if f(x)
+            yield x
+fn bindGen(own g: Gen(A) own f: A -> Gen(B)) -> Gen(B) =
+    for x <- g
+        for y <- f(x)
+            yield y
+fn pureGen(own x: A) -> Gen(A) =
+    yield x
+impl Functor(Gen) =
+    fn map(g f) = mapGen(g.copy f.copy)
+impl Monad(Gen) =
+    fn pure(x) = pureGen(x)
+    fn (m) >>= (f) = bindGen(m.copy f.copy)
+impl Filter(Gen) =
+    fn filter(g f) = filterGen(g.copy f.copy)
+impl Each(Gen) =
+    fn each(g f) = @prim("gen_each")
+impl Clone(Gen(T)) =
+    fn (x).copy = x
+impl Clone(A -> B) =
+    fn (x).copy = x
+
+fn +(t: Text).chars -> Gen(Text) = gen(textChars(t))
+fn +(t: Text).bytes -> Gen(u8) = gen(textBytes(t))
+fn +(t: Text).graphemes -> Gen(Text) = gen(textGraphemes(t))
+fn textChars(t: Text) -> List(Text) = @prim("text_chars")
+fn textBytes(t: Text) -> List(u8) = @prim("text_bytes")
+fn textGraphemes(t: Text) -> List(Text) = @prim("text_graphemes")
+
+// ---------------------------------------------------------------- Lazy
+fn +(l: Lazy(T)).force -> T = @prim("lazy_force")

@@ -31,6 +31,31 @@ VOID = ir.VoidType()
 K_DATA, K_CLOS, K_TEXT = 0, 1, 2
 
 
+class _TokenType(ir.Type):
+    def _to_string(self) -> str:
+        return "token"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _TokenType)
+
+    def __hash__(self) -> int:
+        return hash("token")
+
+
+TOKEN = _TokenType()
+
+
+class _TokenNone(ir.values.Value):
+    def __init__(self) -> None:
+        self.type = TOKEN
+
+    def get_reference(self) -> str:
+        return "none"
+
+    def __str__(self) -> str:
+        return "token none"
+
+
 def resolve(t: Type) -> Type:
     t = prune(t)
     if isinstance(t, TVar):
@@ -76,6 +101,8 @@ class FnState:
     ret_ty: Type | None = None
     lam: A.Lambda | None = None
     allocas: Any = None
+    gen: Any = None  # objeto Gen (dentro do corpo de uma coroutine)
+    coro: Any = None  # (id, handle, cleanup_bb, suspend_bb)
 
 
 class Codegen:
@@ -152,10 +179,31 @@ class Codegen:
         p = b.call(entry, [], cconv="tailcc")
         code = b.call(self.runtime("uu_run", 1, I32), [p])
         b.ret(code)
+        self.gen_coro_helpers()
         while self.work:
             item = self.work.pop()
             self.gen_body(*item)
-        return str(self.mod)
+        text = str(self.mod)
+        import re as _re
+        return _re.sub(r'(define i8\* @"coro\.[^"]*"\([^)]*\))', r"\1 presplitcoroutine", text)
+
+    def gen_coro_helpers(self) -> None:
+        for name, intr, ret in (("uu_coro_resume", "llvm.coro.resume", VOID),
+                                ("uu_coro_done", "llvm.coro.done", I1),
+                                ("uu_coro_destroy", "llvm.coro.destroy", VOID)):
+            fi = ir.Function(self.mod, ir.FunctionType(ret, [PTR]), name=intr)
+            f = ir.Function(self.mod, ir.FunctionType(VOID if ret is VOID else I64, [I64]), name=name)
+            b = ir.IRBuilder(f.append_basic_block("entry"))
+            r = b.call(fi, [b.inttoptr(f.args[0], PTR)])
+            if ret is VOID:
+                b.ret_void()
+            else:
+                b.ret(b.zext(r, I64))
+
+    def intrinsic(self, name: str, ret: Any, args: list[Any]) -> ir.Function:
+        if name in self.mod.globals:
+            return self.mod.globals[name]
+        return ir.Function(self.mod, ir.FunctionType(ret, args), name=name)
 
     def gen_apply(self, n: int) -> None:
         """uu_applyN(clo, args...) em convenção C, chamando o ponteiro tailcc da closure."""
@@ -205,11 +253,141 @@ class Codegen:
                 self.st.scopes[-1].append((slot, pt))
         if fi.prim is not None:
             self.gen_prim(fi, f, ft)
+        elif fi.is_gen:
+            self.gen_generator(fi, f, sub, ft)
         else:
             assert fi.body is not None
             self.tail(fi.body)
         self.finish_fn()
         self.b, self.st = saved
+
+    # ------------------------------------------------------------------ generators
+    def gen_generator(self, fi: FnInfo, f: ir.Function, sub: dict[int, Type], ft: Type) -> None:
+        """`f` cria o objeto Gen e a coroutine; o corpo vira a coroutine."""
+        assert isinstance(ft, TFn)
+        rt = prune(ft.ret)
+        el = rt.args[0] if isinstance(rt, TCon) and rt.args else TCon("()")
+        args = [self.b.load(self.st.locals[p.local.id].ptr) for p in fi.params]  # type: ignore[attr-defined]
+        self.st.scopes = [[]]  # os parâmetros passam para a coroutine
+        g = self.call_rt("uu_gen_new", self.const(1 if is_heap(el) else 0))
+        n = len(fi.params)
+        co = ir.Function(self.mod, ir.FunctionType(PTR, [I64] * (n + 1)), name=self.name("coro"))
+        h = self.b.call(co, [g] + args)
+        self.call_rt("uu_gen_set_handle", g, self.b.ptrtoint(h, I64), ret=VOID)
+        self.b.ret(g)
+        saved = (self.b, self.st)
+        st = FnState(co, sub, scopes=[[]])
+        self.start_fn(co, st)
+        st.gen = co.args[0]
+        b = self.b
+        cid = b.call(self.intrinsic("llvm.coro.id", TOKEN, [I32, PTR, PTR, PTR]),
+                     [ir.Constant(I32, 0), ir.Constant(PTR, None), ir.Constant(PTR, None), ir.Constant(PTR, None)])
+        size = b.call(self.intrinsic("llvm.coro.size.i64", I64, []), [])
+        mem = self.call_rt("malloc", size, ret=PTR)
+        hdl = b.call(self.intrinsic("llvm.coro.begin", PTR, [TOKEN, PTR]), [cid, mem])
+        cleanup = co.append_basic_block("coro_cleanup")
+        susp = co.append_basic_block("coro_suspend")
+        st.coro = (cid, hdl, cleanup, susp)
+        for p, arg, pt in zip(fi.params, co.args[1:], ft.params):
+            slot = self.new_slot(p.name)
+            b.store(arg, slot)
+            st.locals[p.local.id] = Local("slot", slot, pt)  # type: ignore[attr-defined]
+            st.scopes[-1].append((slot, pt))
+        self.suspend(final=False)
+        assert fi.body is not None
+        self.tail(fi.body)
+        cb = ir.IRBuilder(cleanup)
+        m = cb.call(self.intrinsic("llvm.coro.free", PTR, [TOKEN, PTR]), [cid, hdl])
+        cb.call(self.runtime("free", 1, VOID, [PTR]), [m])
+        cb.branch(susp)
+        sb = ir.IRBuilder(susp)
+        sb.call(self.intrinsic("llvm.coro.end", VOID, [PTR, I1, TOKEN]), [hdl, ir.Constant(I1, 0), _TokenNone()])
+        sb.ret(hdl)
+        self.finish_fn()
+        self.b, self.st = saved
+
+    def suspend(self, final: bool) -> None:
+        cid, hdl, cleanup, susp = self.st.coro
+        b = self.b
+        r = b.call(self.intrinsic("llvm.coro.suspend", I8, [TOKEN, I1]), [_TokenNone(), ir.Constant(I1, int(final))])
+        cont = b.append_basic_block("resume")
+        destroy = b.append_basic_block("destroy")
+        sw = b.switch(r, susp)
+        sw.add_case(ir.Constant(I8, 0), cont)
+        sw.add_case(ir.Constant(I8, 1), destroy)
+        b.position_at_end(destroy)
+        if not final:
+            for scope in reversed(self.st.scopes):
+                for slot, t in reversed(scope):
+                    if is_heap(t):
+                        self.dec(b.load(slot), t)
+        b.branch(cleanup)
+        b.position_at_end(cont)
+        if final:
+            b.unreachable()
+
+    def x_Yield(self, e: A.Yield) -> Any:
+        v = self.expr(e.expr)
+        self.call_rt("uu_gen_yield", self.st.gen, v, ret=VOID)
+        self.suspend(final=False)
+        return self.const(0)
+
+    def x_For(self, e: A.For) -> Any:
+        """`for` dentro de generator: laço inline sobre List ou Gen."""
+        assert e.body is not None
+        self.for_gen(e.gens, 0, e.body)
+        return self.const(0)
+
+    def for_gen(self, gens: list[A.Gen], k: int, body: A.Expr) -> None:
+        g = gens[k]
+        b = self.b
+        st = self.ty(g.src)
+        src = self.expr(g.src)
+        self.push()
+        sslot = self.temp(src, st)
+        is_list = isinstance(st, TCon) and st.name == "List"
+        idx = self.new_slot("i")
+        b.store(self.const(0), idx)
+        head = b.append_basic_block("for")
+        bodyb = b.append_basic_block("for_body")
+        done = b.append_basic_block("endfor")
+        b.branch(head)
+        b.position_at_end(head)
+        if is_list:
+            n = b.load(b.gep(b.inttoptr(b.load(sslot), ir.PointerType(I32)), [ir.Constant(I32, 4)]))
+            c = b.icmp_signed("<", b.load(idx), b.zext(n, I64))
+        else:
+            c = b.trunc(self.call_rt("uu_gen_step", b.load(sslot)), I1)
+        b.cbranch(c, bodyb, done)
+        b.position_at_end(bodyb)
+        pat = g.pat  # type: ignore[attr-defined]
+        el = self.conc(pat.ty)
+        if is_list:
+            i = b.load(idx)
+            v = b.load(b.gep(self.to_ptr(b.load(sslot)), [b.add(i, self.const(4))]))
+            self.inc(v, el)
+            b.store(b.add(i, self.const(1)), idx)
+        else:
+            v = self.call_rt("uu_gen_value", b.load(sslot))
+        self.push()
+        self.bind_pat(pat, v, el)
+        join = b.append_basic_block("for_next")
+        for cnd in g.conds:
+            cv = self.cond(cnd)
+            ok = b.append_basic_block("for_ok")
+            b.cbranch(cv, ok, join)
+            b.position_at_end(ok)
+        if k + 1 < len(gens):
+            self.for_gen(gens, k + 1, body)
+        else:
+            r = self.expr(body)
+            self.dec(r, self.ty(body))
+        b.branch(join)
+        b.position_at_end(join)
+        self.pop()
+        b.branch(head)
+        b.position_at_end(done)
+        self.pop()
 
     # ------------------------------------------------------------------ retorno / cauda
     def cleanup_all(self) -> None:
@@ -222,6 +400,9 @@ class Codegen:
 
     def ret(self, v: Any) -> None:
         self.cleanup_all()
+        if self.st.gen is not None:
+            self.suspend(final=True)
+            return
         self.b.ret(v)
 
     def tail(self, e: A.Expr) -> None:
@@ -616,7 +797,7 @@ class Codegen:
         return self.emit_call(fn, [clo] + args, tail and not has_bang)
 
     def emit_call(self, f: Any, args: list[Any], tail: bool) -> Any:
-        if tail:
+        if tail and self.st.gen is None:
             self.cleanup_all()
             r = self.b.call(f, args, cconv="tailcc", tail="musttail")
             self.b.ret(r)
@@ -865,7 +1046,10 @@ class Codegen:
         return self.alloc_data(0, [self.b.load(slot)], [lt])
 
     def x_LazyE(self, e: A.LazyE) -> Any:
-        raise CodegenError("lazy ainda não suportado")
+        clo = self.x_Lambda(e.lam)  # type: ignore[attr-defined]
+        t = self.ty(e)
+        assert isinstance(t, TCon)
+        return self.call_rt("uu_lazy_new", clo, self.const(1 if is_heap(t.args[0]) else 0))
 
     # ------------------------------------------------------------------ match
     def x_Match(self, e: A.Match) -> Any:
@@ -1012,7 +1196,8 @@ class Codegen:
             return
         if name in ("fmt_text", "text_concat", "text_eq", "req_print", "list_len", "list_get", "list_at",
                     "list_push", "list_set", "list_concat", "list_fold", "list_each", "list_filter",
-                    "list_range", "list_each_mut"):
+                    "list_range", "list_each_mut", "gen_take", "gen_to_list", "gen_next", "gen_each",
+                    "lazy_force", "text_chars", "text_bytes", "text_graphemes"):
             b.ret(self.call_rt("uu_" + name, *args))
             return
         if name == "panic":

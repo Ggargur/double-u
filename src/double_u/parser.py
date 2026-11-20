@@ -212,12 +212,14 @@ class Parser:
         is_gen = isinstance(ret, A.TName) and ret.name == "Gen" and ret.module is None
         body = None
         if self.accept("PUNCT", "="):
-            saved = self.gen_mode
+            saved = (self.gen_mode, getattr(self, "saw_yield", False))
             self.gen_mode = is_gen
+            self.saw_yield = False
             try:
                 body = self.body()
+                is_gen = is_gen and self.saw_yield
             finally:
-                self.gen_mode = saved
+                self.gen_mode, self.saw_yield = saved
         return A.FnDecl(start.pos, str(name.value), public, fixity, params, ret, io, given, body,
                         assoc, prec, is_gen)
 
@@ -475,6 +477,7 @@ class Parser:
                 self.next()
                 if not self.gen_mode:
                     raise self.error("`yield` fora de generator ou compreensão", t)
+                self.saw_yield = True
                 return A.Yield(t.pos, self.expr())
         if self.is_lambda():
             return self.lambda_()
@@ -780,6 +783,8 @@ class Parser:
         return A.Gen(t.pos, pats, src, conds)
 
     def line_has_larrow(self) -> bool:
+        if self.tok.kind == "KW" and self.tok.value in ("for", "if", "while", "match", "yield"):
+            return False
         j = self.i
         depth = 0
         while True:

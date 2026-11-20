@@ -1,0 +1,7 @@
+// error: posse 2
+fn +repete(xs: List(int)) -> Gen(int) =
+    for x <- xs
+        yield x
+fn +main() -> Pending(int) io =
+    for _ <- print("{toList(repete([1]))}")
+        yield 0

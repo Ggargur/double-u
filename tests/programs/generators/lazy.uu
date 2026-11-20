@@ -1,0 +1,15 @@
+//> antes
+//> calculando
+//> 42
+//> 42
+fn caro(x: int) -> int =
+    @debug("calculando")
+    x * 2
+fn +main() -> Pending(int) io =
+    cache = lazy caro(21)
+    _ = @debug("antes")
+    a = cache.force
+    b = cache.force
+    for _ <- print("{a}")
+        _ <- print("{b}")
+        yield 0

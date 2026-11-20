@@ -779,9 +779,15 @@ class Checker:
             f.locals.append(lv)
         assert f.body is not None
         try:
-            t = self.expr(f.body, ft.ret)
-            self.unify_at(ft.ret, t, result_pos(f.body), "no retorno")
-            mark_tail(f.body, True, self)
+            if f.is_gen:
+                rt = prune(ft.ret)
+                if not (isinstance(rt, TCon) and rt.name == "Gen"):
+                    self.err("tipo", f.pos or Pos(f.module.path, 1, 1), "generator precisa retornar `Gen(T)`")
+                self.expr(f.body, UNIT)
+            else:
+                t = self.expr(f.body, ft.ret)
+                self.unify_at(ft.ret, t, result_pos(f.body), "no retorno")
+                mark_tail(f.body, True, self)
         except Abort:
             pass
         self.ctx = None
@@ -1260,14 +1266,19 @@ class Checker:
         for g in e.gens:
             st = self.expr(g.src)
             el = self.fresh()
-            self.unify_at(TCon(head_name(st) or "Gen", [el]) if isinstance(prune(st), TCon) else st, st, g.src.pos)
             pst = prune(st)
-            if isinstance(pst, TCon) and pst.args:
-                el = pst.args[-1] if pst.name != "Map" else TCon("#", list(pst.args))
+            if isinstance(pst, TCon) and pst.name == "List":
+                el = pst.args[0]
+            else:
+                self.unify_at(TCon("Gen", [el]), st, g.src.pos, "(em generators, `for` percorre List ou Gen)")
             self.push()
+            for c in g.conds:
+                pass
             pat = g.pats[0] if len(g.pats) == 1 else A.PTuple(g.pos, g.pats)
             g.pat = pat  # type: ignore[attr-defined]
             self.pat(pat, el, "let")
+            for c in g.conds:
+                self.unify_at(BOOL, self.expr(c, BOOL), c.pos)
         assert e.body is not None
         self.expr(e.body)
         for _ in e.gens:

@@ -1,0 +1,25 @@
+//> 1
+//> 2
+//> 3
+//> [10 20 30]
+//> [2 3]
+fn +ate(n: int) -> Gen(int) =
+    var i = 1
+    while i <= n
+        yield i
+        i = i + 1
+fn +pares(own xs: List(Text)) -> Gen(Text) =
+    for x <- xs
+        yield x ++ x
+fn +main() -> Pending(int) io =
+    var linhas = []
+    for x <- ate(3)
+        linhas = push(linhas "{x}")
+    dez = for x <- ate(3) yield x * 10
+    filtrados = for x <- ate(3), x > 1 yield x
+    for _ <- print(at(linhas 0))
+        _ <- print(at(linhas 1))
+        _ <- print(at(linhas 2))
+        _ <- print("{toList(dez)}")
+        _ <- print("{toList(filtrados)}")
+        yield len(toList(pares(["a"]))) - 1

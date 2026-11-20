@@ -54,6 +54,12 @@ class Ownership:
     def check_fn(self, f: FnInfo) -> None:
         self.moved = {}
         self.ck.module = f.module
+        if f.is_gen:
+            for p in f.params:
+                lv = getattr(p, "local", None)
+                if lv is not None and lv.kind == "borrow" and not self.copyable(lv.ty):
+                    self.err(p.pos, f"o generator guarda o parâmetro emprestado `{p.name}` além da chamada",
+                             f"declare o parâmetro como `own {p.name}`")
         self.expr(f.body)
 
     def err(self, pos: Pos, msg: str, *notes: str) -> None:
