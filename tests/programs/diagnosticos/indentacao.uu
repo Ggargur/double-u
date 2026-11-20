@@ -1,0 +1,7 @@
+// error: indentacao 7
+fn +main() -> Pending(int) io =
+    for _ <- print("x")
+        yield 0
+fn f() =
+      a = 1
+    a

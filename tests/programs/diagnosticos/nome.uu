@@ -1,0 +1,7 @@
+// error: nome 4
+// error: nome 7
+fn f() -> int =
+    naoexiste + 1
+fn +main() -> Pending(int) io =
+    for _ <- print("x")
+        yield tambem

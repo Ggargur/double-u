@@ -1,0 +1,7 @@
+// error: sintaxe 4
+// error: sintaxe 7
+fn f() -> int =
+    1 + * 2
+fn +main() -> Pending(int) io =
+    for _ <- print("x")
+        yield )

@@ -774,9 +774,12 @@ class Checker:
             ctx.scopes[0][p.name] = lv
             f.locals.append(lv)
         assert f.body is not None
-        t = self.expr(f.body, ft.ret)
-        self.unify_at(ft.ret, t, result_pos(f.body), "no retorno")
-        mark_tail(f.body, True, self)
+        try:
+            t = self.expr(f.body, ft.ret)
+            self.unify_at(ft.ret, t, result_pos(f.body), "no retorno")
+            mark_tail(f.body, True, self)
+        except Abort:
+            pass
         self.ctx = None
 
     # ------------------------------------------------------------------ escopos

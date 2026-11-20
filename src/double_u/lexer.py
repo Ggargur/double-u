@@ -327,13 +327,16 @@ class Lexer:
                         out.append(Token("INDENT", None, tok.pos))
                     else:
                         while col < stack[-1]:
-                            stack.pop()
+                            popped = stack.pop()
+                            if col > stack[-1]:
+                                # dedent para uma coluna que não abre bloco: erro, e
+                                # recupera tratando a linha como parte do bloco interno
+                                self.diags.error("indentacao", tok.pos,
+                                                 "indentação inconsistente com os blocos abertos")
+                                stack.append(col)
+                                del popped
+                                break
                             out.append(Token("DEDENT", None, tok.pos))
-                        if col != stack[-1]:
-                            self.diags.error("indentacao", tok.pos,
-                                             "indentação inconsistente com os blocos abertos")
-                            stack.append(col)
-                            out.append(Token("INDENT", None, tok.pos))
                         out.append(Token("NEWLINE", None, tok.pos))
                 elif col != 1:
                     self.diags.error("indentacao", tok.pos, "a primeira linha não pode estar indentada")

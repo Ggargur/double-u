@@ -111,7 +111,7 @@ class Parser:
                 d = self.decl()
                 if d is not None:
                     decls.append(d)
-                if not self.at("EOF") and not self.at("NEWLINE"):
+                if not self.at("EOF") and not self.at("NEWLINE") and not self.at("DEDENT"):
                     raise self.error(f"esperava fim de linha, encontrei {self.describe(self.tok)}")
             except Abort:
                 self.sync_decl()
@@ -781,8 +781,8 @@ class Parser:
         j = self.i
         depth = 0
         while True:
-            t = self.toks[j]
-            if t.kind in ("NEWLINE", "EOF", "INDENT", "DEDENT") and depth == 0:
+            t = self.toks[min(j, len(self.toks) - 1)]
+            if t.kind == "EOF" or t.kind in ("NEWLINE", "INDENT", "DEDENT") and depth == 0:
                 return False
             if t.kind == "PUNCT" and t.value in ("(", "[", "{", "#("):
                 depth += 1

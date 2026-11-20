@@ -1,0 +1,5 @@
+// error: lexico 5
+fn +main() -> Pending(int) io =
+    for _ <- print("x")
+        yield 0
+x = 1 $ 2
