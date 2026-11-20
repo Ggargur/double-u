@@ -1425,9 +1425,7 @@ class Codegen:
         return r
 
 
-class _Derive:
-    """Implementações derivadas estruturalmente (Eq, Format, Clone)."""
-
+    # ------------------------------------------------------------------ derivação (Eq, Format, Clone)
     def derived(self, mi: MethodInfo, inst: list[Type]) -> ir.Function:
         param = inst[0]
         k = ("derive", mi.trait.name, mi.name, key(param))
@@ -1543,9 +1541,6 @@ class _Derive:
         b.ret(self.call_rt("uu_fmt_text", b.load(res), spec))
 
 
-for _n, _v in vars(_Derive).items():
-    if callable(_v) and not _n.startswith("__"):
-        setattr(Codegen, _n, _v)
 
 
 class CodegenError(Exception):
