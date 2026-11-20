@@ -92,8 +92,25 @@ impl Functor(Pending) =
 impl Monad(Pending) =
     fn pure(x) = @prim("pending_pure")
     fn (m) >>= (f) = @prim("pending_bind")
+impl Clone(Pending(T)) =
+    fn (x).copy = x
 
+/// Resultado já disponível? Puro: só olha o estado.
+fn +(p: Pending(T)).poll -> Maybe(T) = @prim("pending_poll")
+
+/// Imprime uma linha no fim do tick (thread principal, em ordem).
 fn +print(t: Text) -> Pending(()) io = @prim("req_print")
+/// Resolve no fim do tick atual.
+fn +nextTick() -> Pending(()) io = @prim("req_next_tick")
+/// Resolve depois de `n` ticks.
+fn +sleepTicks(n: int) -> Pending(()) io =
+    if n <= 0 then pure(()) else nextTick() >>= (u => sleepTicks((n - 1)))
+/// Espera `ms` milissegundos num worker, sem bloquear o tick.
+fn +sleepMs(ms: int) -> Pending(()) io = @prim("req_sleep_ms")
+/// Lê o arquivo inteiro num worker.
+fn +readFile(path: Text) -> Pending(Result(Text Text)) io = @prim("req_read_file")
+/// Escreve (substitui) o arquivo num worker.
+fn +writeFile(path: Text content: Text) -> Pending(Result(() Text)) io = @prim("req_write_file")
 
 // ---------------------------------------------------------------- Text
 impl Append(Text) =

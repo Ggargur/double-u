@@ -1,0 +1,14 @@
+//> debug: d1
+//> a
+//> b
+//> c
+//> d
+fn emite() -> Pending(()) io =
+    a = print("a")
+    b = print("b")
+    @debug("debug: d1")
+    c = print("c")
+    print("d")
+fn +main() -> Pending(int) io =
+    for _ <- emite()
+        yield 0

@@ -1,0 +1,14 @@
+//> escrita: Ok(())
+//> lido: olá, arquivo
+//> inexistente: erro
+fn mostra(r: Result(Text Text)) -> Text = match r
+    Ok(t) -> t
+    Err(_) -> "erro"
+fn +main() -> Pending(int) io =
+    for w <- writeFile(".escreve_arquivo.tmp" "olá, arquivo")
+        _ <- print("escrita: {w}")
+        r <- readFile(".escreve_arquivo.tmp")
+        _ <- print("lido: {mostra(r)}")
+        x <- readFile("nao_existe.txt")
+        _ <- print("inexistente: {mostra(x)}")
+        yield 0

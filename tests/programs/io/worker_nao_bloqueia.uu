@@ -1,0 +1,12 @@
+//> depois de 5 ticks: Nothing
+//> no fim: Just(())
+fn estado(p: Pending(())) -> Text = match p.poll
+    Just(v) -> "Just({v})"
+    Nothing -> "Nothing"
+fn +main() -> Pending(int) io =
+    lento = sleepMs(300)
+    for _ <- sleepTicks(5)
+        _ <- print("depois de 5 ticks: {estado(lento)}")
+        _ <- lento.copy
+        _ <- print("no fim: {estado(lento)}")
+        yield 0

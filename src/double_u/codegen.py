@@ -1012,8 +1012,14 @@ class Codegen:
             return
         if name in ("fmt_text", "text_concat", "text_eq", "req_print", "list_len", "list_get", "list_at",
                     "list_push", "list_set", "list_concat", "list_fold", "list_each", "list_filter",
-                    "list_range", "list_each_mut"):
+                    "list_range", "list_each_mut", "req_next_tick", "req_sleep_ms", "req_read_file",
+                    "req_write_file"):
             b.ret(self.call_rt("uu_" + name, *args))
+            return
+        if name == "pending_poll":
+            pt = prune(pts[0])
+            assert isinstance(pt, TCon)
+            b.ret(self.call_rt("uu_pending_poll", args[0], self.const(1 if is_heap(pt.args[0]) else 0)))
             return
         if name == "panic":
             self.call_rt("uu_panic", args[0], ret=VOID)
