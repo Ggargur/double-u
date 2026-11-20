@@ -1,14 +1,20 @@
 // Runtime da double-u: objetos com contagem de referência, Text, Pending e o
-// loop de ticks com a fila de pedidos da thread principal (ADR 0004).
+// loop de ticks com a fila de pedidos da thread principal e o pool de workers
+// (ADR 0004).
+#define _GNU_SOURCE
+#include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include "runtime.h"
 
 // ------------------------------------------------------------------ objetos
 static void obj_free(Obj *o);
+static W just(W x, W isptr);
 
 W uu_alloc(W kind, W tag, W n, W mask) {
     size_t extra = (kind == K_TEXT) ? (size_t)n + 1 : (size_t)n * sizeof(W);
@@ -334,20 +340,40 @@ static void pending_listen(W pw, int kind, W fn, W out) {
     *tail = c;
 }
 
+// O último callback (map ou chain) é tratado em laço, não em recursão: um
+// polling recursivo (`nextTick() >>= ...`) forma uma corrente com um elo por
+// tick, e resolvê-la recursivamente estouraria a pilha.
 static void pending_resolve(W pw, W v) {
-    Pending *p = (Pending *)pw;
-    p->state = 1;
-    p->value = v;
-    Callback *c = p->cbs;
-    p->cbs = NULL;
-    uu_inc(pw);
-    while (c) {
-        Callback *n = c->next;
-        pending_listen(pw, c->kind, c->fn, c->out);
-        free(c);
-        c = n;
+    W held = 0;  // `out` herdado do callback anterior (referência nossa)
+    for (;;) {
+        Pending *p = (Pending *)pw;
+        p->state = 1;
+        p->value = v;
+        Callback *c = p->cbs;
+        p->cbs = NULL;
+        uu_inc(pw);
+        W next = 0, nv = 0;
+        while (c) {
+            Callback *n = c->next;
+            if (!n && (c->kind == CB_CHAIN || c->kind == CB_MAP)) {
+                W x = p->value;
+                if (p->vptr) uu_inc(x);
+                nv = c->kind == CB_MAP ? uu_apply1(c->fn, x) : x;
+                next = c->out;
+                free(c);
+                break;
+            }
+            pending_listen(pw, c->kind, c->fn, c->out);
+            free(c);
+            c = n;
+        }
+        uu_dec(pw);
+        if (held) uu_dec(held);
+        if (!next) return;
+        held = next;
+        pw = next;
+        v = nv;
     }
-    uu_dec(pw);
 }
 
 W uu_pending_pure(W x, W vptr) {
@@ -375,20 +401,42 @@ W uu_pending_bind(W p, W f, W vptr) {
 W uu_pending_poll_state(W p) { return ((Pending *)p)->state; }
 W uu_pending_value(W p) { return ((Pending *)p)->value; }
 
+W uu_pending_poll(W p, W isptr) {
+    Pending *pp = (Pending *)p;
+    W r;
+    if (pp->state == 1) {
+        W v = pp->value;
+        if (isptr) uu_inc(v);
+        r = just(v, isptr);
+    } else r = uu_nullary(1);
+    uu_dec(p);
+    return r;
+}
+
 // ------------------------------------------------------------------ pedidos e ticks
+// Pedidos de thread principal (print, nextTick, FFI `main`) entram numa fila e
+// rodam em ordem de emissão no fim do tick. Pedidos de worker (arquivos, sleepMs,
+// FFI `worker`) vão para um pool de pthreads; o resultado volta como dado bruto
+// e é entregue na thread principal entre ticks. Workers nunca tocam objetos com
+// RC (o RC não é thread-safe): tudo o que cruza a fronteira é copiado antes.
+typedef W (*Invoker)(W *slots);
+
 typedef struct Req {
     int kind;
     W arg;
     W pending;
+    Invoker inv;  // FFI `main`
+    W *slots;
+    W freemask, retkind;
     struct Req *next;
 } Req;
 
-enum { REQ_PRINT };
+enum { REQ_PRINT, REQ_TICK, REQ_FFI };
 
 static Req *queue_head, *queue_tail;
 
-static W emit(int kind, W arg, int vptr) {
-    Req *r = malloc(sizeof(Req));
+static Req *emit(int kind, W arg, int vptr) {
+    Req *r = calloc(1, sizeof(Req));
     r->kind = kind;
     r->arg = arg;
     r->pending = pending_new(vptr);
@@ -396,10 +444,235 @@ static W emit(int kind, W arg, int vptr) {
     r->next = NULL;
     if (queue_tail) queue_tail->next = r; else queue_head = r;
     queue_tail = r;
-    return r->pending;
+    return r;
 }
 
-W uu_req_print(W text) { return emit(REQ_PRINT, text, 0); }
+W uu_req_print(W text) { return emit(REQ_PRINT, text, 0)->pending; }
+W uu_req_next_tick(void) { return emit(REQ_TICK, 0, 0)->pending; }
+
+// ---- FFI: o compilador gera um "invoker" C que lê slots brutos e chama a função
+W uu_ffi_slots(W n) { return (W)calloc((size_t)(n > 0 ? n : 1), sizeof(W)); }
+
+W uu_cstr_dup(W text) {
+    size_t n = (size_t)uu_text_len(text);
+    char *s = malloc(n + 1);
+    memcpy(s, uu_text_ptr(text), n);
+    s[n] = 0;
+    uu_dec(text);
+    return (W)s;
+}
+
+static W ffi_call(Invoker inv, W *slots, W freemask) {
+    W r = inv(slots);
+    for (int i = 0; i < 64; i++)
+        if ((uint64_t)freemask & (1ull << i)) free((void *)slots[i]);
+    free(slots);
+    return r;
+}
+
+// retkind 1: CStr devolvido vira Text (copiado; a memória continua do C)
+static W ffi_value(W raw, W retkind) {
+    if (retkind == 1) {
+        const char *s = (const char *)raw;
+        return s ? uu_text_new(s, strlen(s)) : uu_text_new("", 0);
+    }
+    return raw;
+}
+
+// ---- pool de workers
+typedef struct Job Job;
+struct Job {
+    void (*run)(Job *);      // no worker: só dados brutos
+    void (*deliver)(Job *);  // na thread principal: monta valores e resolve
+    W pending;
+    char *s1, *s2;
+    size_t n2;
+    W i1;
+    char *out;
+    size_t outn;
+    int err;
+    Invoker inv;
+    W *slots;
+    W freemask, retkind, result;
+    Job *next;
+};
+
+#define N_WORKERS 4
+static pthread_mutex_t pool_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t jobs_cv = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t done_cv = PTHREAD_COND_INITIALIZER;
+static Job *jobs_head, *jobs_tail, *done_head, *done_tail;
+static int n_started;
+static long outstanding;  // só a thread principal mexe
+
+static void *worker_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&pool_mu);
+        while (!jobs_head) pthread_cond_wait(&jobs_cv, &pool_mu);
+        Job *j = jobs_head;
+        jobs_head = j->next;
+        if (!jobs_head) jobs_tail = NULL;
+        pthread_mutex_unlock(&pool_mu);
+        j->run(j);
+        pthread_mutex_lock(&pool_mu);
+        j->next = NULL;
+        if (done_tail) done_tail->next = j; else done_head = j;
+        done_tail = j;
+        pthread_cond_signal(&done_cv);
+        pthread_mutex_unlock(&pool_mu);
+    }
+    return NULL;
+}
+
+static W submit(Job *j, int vptr) {
+    j->pending = pending_new(vptr);
+    uu_inc(j->pending);
+    j->next = NULL;
+    outstanding++;
+    pthread_mutex_lock(&pool_mu);
+    while (n_started < N_WORKERS) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, worker_main, NULL) != 0) break;
+        pthread_detach(t);
+        n_started++;
+    }
+    if (n_started == 0) {
+        pthread_mutex_unlock(&pool_mu);
+        uu_panic_c("não consegui criar threads de worker");
+    }
+    if (jobs_tail) jobs_tail->next = j; else jobs_head = j;
+    jobs_tail = j;
+    pthread_cond_signal(&jobs_cv);
+    pthread_mutex_unlock(&pool_mu);
+    return j->pending;
+}
+
+// entrega os trabalhos concluídos na thread principal; com `block`, espera um
+static void deliver_done(int block) {
+    if (outstanding == 0) return;
+    pthread_mutex_lock(&pool_mu);
+    while (block && !done_head) pthread_cond_wait(&done_cv, &pool_mu);
+    Job *j = done_head;
+    done_head = done_tail = NULL;
+    pthread_mutex_unlock(&pool_mu);
+    while (j) {
+        Job *n = j->next;
+        outstanding--;
+        j->deliver(j);
+        uu_dec(j->pending);
+        free(j);
+        j = n;
+    }
+}
+
+// Result: Ok(x) tem tag 0, Err(e) tag 1
+static W result_obj(int ok, W v, int vptr) {
+    W o = uu_alloc(K_DATA, ok ? 0 : 1, 1, vptr ? 1 : 0);
+    ((Obj *)o)->f[0] = v;
+    return o;
+}
+
+static W err_text(const char *path, int err) {
+    char buf[512];
+    int n = snprintf(buf, sizeof buf, "%s: %s", path, strerror(err));
+    if (n < 0) n = 0;
+    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;
+    return uu_text_new(buf, (size_t)n);
+}
+
+// sleepMs
+static void run_sleep(Job *j) {
+    struct timespec ts = { (time_t)(j->i1 / 1000), (long)(j->i1 % 1000) * 1000000L };
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
+}
+static void deliver_unit(Job *j) { pending_resolve(j->pending, 0); }
+
+W uu_req_sleep_ms(W ms) {
+    Job *j = calloc(1, sizeof(Job));
+    j->run = run_sleep;
+    j->deliver = deliver_unit;
+    j->i1 = ms < 0 ? 0 : ms;
+    return submit(j, 0);
+}
+
+// readFile
+static void run_read(Job *j) {
+    FILE *f = fopen(j->s1, "rb");
+    if (!f) { j->err = errno; return; }
+    size_t cap = 4096, n = 0, k;
+    char *buf = malloc(cap);
+    while ((k = fread(buf + n, 1, cap - n, f)) > 0) {
+        n += k;
+        if (n == cap) { cap *= 2; buf = realloc(buf, cap); }
+    }
+    if (ferror(f)) { j->err = errno ? errno : EIO; free(buf); buf = NULL; }
+    fclose(f);
+    j->out = buf;
+    j->outn = n;
+}
+static void deliver_read(Job *j) {
+    W r = j->err ? result_obj(0, err_text(j->s1, j->err), 1)
+                 : result_obj(1, uu_text_new(j->out, j->outn), 1);
+    free(j->s1);
+    free(j->out);
+    pending_resolve(j->pending, r);
+}
+
+W uu_req_read_file(W path) {
+    Job *j = calloc(1, sizeof(Job));
+    j->run = run_read;
+    j->deliver = deliver_read;
+    j->s1 = (char *)uu_cstr_dup(path);
+    return submit(j, 1);
+}
+
+// writeFile
+static void run_write(Job *j) {
+    FILE *f = fopen(j->s1, "wb");
+    if (!f) { j->err = errno; return; }
+    if (j->n2 && fwrite(j->s2, 1, j->n2, f) != j->n2) j->err = errno ? errno : EIO;
+    if (fclose(f) != 0 && !j->err) j->err = errno ? errno : EIO;
+}
+static void deliver_write(Job *j) {
+    W r = j->err ? result_obj(0, err_text(j->s1, j->err), 1) : result_obj(1, 0, 0);
+    free(j->s1);
+    free(j->s2);
+    pending_resolve(j->pending, r);
+}
+
+W uu_req_write_file(W path, W content) {
+    Job *j = calloc(1, sizeof(Job));
+    j->run = run_write;
+    j->deliver = deliver_write;
+    j->s1 = (char *)uu_cstr_dup(path);
+    j->n2 = (size_t)uu_text_len(content);
+    j->s2 = (char *)uu_cstr_dup(content);
+    return submit(j, 1);
+}
+
+// FFI: `main` vai para a fila do tick; `worker`, para o pool
+static void run_ffi(Job *j) { j->result = ffi_call(j->inv, j->slots, j->freemask); }
+static void deliver_ffi(Job *j) { pending_resolve(j->pending, ffi_value(j->result, j->retkind)); }
+
+W uu_req_ffi(W inv, W slots, W worker, W retkind, W freemask) {
+    if (worker) {
+        Job *j = calloc(1, sizeof(Job));
+        j->run = run_ffi;
+        j->deliver = deliver_ffi;
+        j->inv = (Invoker)inv;
+        j->slots = (W *)slots;
+        j->freemask = freemask;
+        j->retkind = retkind;
+        return submit(j, retkind == 1);
+    }
+    Req *r = emit(REQ_FFI, 0, retkind == 1);
+    r->inv = (Invoker)inv;
+    r->slots = (W *)slots;
+    r->freemask = freemask;
+    r->retkind = retkind;
+    return r->pending;
+}
 
 static void exec_req(Req *r) {
     switch (r->kind) {
@@ -408,6 +681,12 @@ static void exec_req(Req *r) {
         fputc('\n', stdout);
         uu_dec(r->arg);
         pending_resolve(r->pending, 0);
+        break;
+    case REQ_TICK:
+        pending_resolve(r->pending, 0);
+        break;
+    case REQ_FFI:
+        pending_resolve(r->pending, ffi_value(ffi_call(r->inv, r->slots, r->freemask), r->retkind));
         break;
     }
     uu_dec(r->pending);
@@ -419,16 +698,24 @@ int uu_run(W main_pending) {
         Req *r = queue_head;
         queue_head = queue_tail = NULL;
         if (!r) {
+            if (outstanding > 0) {
+                // nada para a thread principal: dorme até um worker terminar
+                deliver_done(1);
+                continue;
+            }
             fflush(stdout);
             fputs("double-u: o Pending de `main` nunca resolve (nenhum pedido em andamento)\n", stderr);
             return 101;
         }
+        // fim do tick: pedidos da thread principal, em ordem de emissão
         while (r) {
             Req *n = r->next;
             exec_req(r);
             free(r);
             r = n;
         }
+        // entre ticks: resultados prontos dos workers
+        deliver_done(0);
     }
     int code = (int)mp->value;
     fflush(stdout);

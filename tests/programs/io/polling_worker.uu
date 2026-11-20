@@ -1,0 +1,24 @@
+//> antes: Nothing
+//> depois: primeira linha
+//> segunda linha
+//> ticks passaram: true
+fn mostra(r: Result(Text Text)) -> Text = match r
+    Ok(t) -> t
+    Err(e) -> "erro: {e}"
+fn espera(own p: Pending(Result(Text Text)) n: int) -> Pending(int) io = match p.poll
+    Just(_) -> pure(n)
+    Nothing -> for _ <- nextTick()
+                   r <- espera(p (n + 1))
+                   yield r
+fn primeira(t: Text) -> Text = t
+fn +main() -> Pending(int) io =
+    p = readFile("dados.txt")
+    antes = match p.poll
+        Just(_) -> "Just"
+        Nothing -> "Nothing"
+    for _ <- print("antes: {antes}")
+        n <- espera(p.copy 0)
+        r <- p
+        _ <- print("depois: {mostra(r)}")
+        _ <- print("ticks passaram: {n > 0}")
+        yield 0

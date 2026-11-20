@@ -1,0 +1,11 @@
+// flags: -l _teste.c
+//> sinal recebido: 1
+esperaSinal = @extern("C" "c_espera_sinal" () -> int worker)
+sinaliza    = @extern("C" "c_sinaliza" () -> ())
+fn +main() -> Pending(int) io =
+    espera = esperaSinal()
+    for _ <- sleepTicks(3)
+        _ <- sinaliza()
+        r <- espera
+        _ <- print("sinal recebido: {r}")
+        yield 0

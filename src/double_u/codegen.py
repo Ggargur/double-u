@@ -1199,8 +1199,17 @@ class Codegen:
         if name in ("fmt_text", "text_concat", "text_eq", "req_print", "list_len", "list_get", "list_at",
                     "list_push", "list_set", "list_concat", "list_fold", "list_each", "list_filter",
                     "list_range", "list_each_mut", "gen_take", "gen_to_list", "gen_next", "gen_each",
-                    "lazy_force", "text_chars", "text_bytes", "text_graphemes"):
+                    "lazy_force", "text_chars", "text_bytes", "text_graphemes", "req_next_tick", "req_sleep_ms",
+                    "req_read_file", "req_write_file"):
             b.ret(self.call_rt("uu_" + name, *args))
+            return
+        if name == "extern":
+            self.gen_extern(fi, args)
+            return
+        if name == "pending_poll":
+            pt = prune(pts[0])
+            assert isinstance(pt, TCon)
+            b.ret(self.call_rt("uu_pending_poll", args[0], self.const(1 if is_heap(pt.args[0]) else 0)))
             return
         if name == "panic":
             self.call_rt("uu_panic", args[0], ret=VOID)
@@ -1213,6 +1222,91 @@ class Codegen:
             b.ret(self.call_rt("uu_" + name, *args, flag))
             return
         raise CodegenError(f"primitiva desconhecida: {name}")
+
+    # ------------------------------------------------------------------ FFI
+    def gen_extern(self, fi: FnInfo, args: list[Any]) -> None:
+        """Corpo de uma `@extern`: copia os argumentos para slots brutos (Text vira char* em
+        malloc) e emite um pedido; o runtime chama o invoker na thread principal ou num worker."""
+        cname, cparams, cret, affinity = fi.extern  # type: ignore[attr-defined]
+        b = self.b
+        inv = self.ffi_invoker(cname, cparams, cret)
+        slots = self.call_rt("uu_ffi_slots", self.const(len(args)))
+        sp = self.to_ptr(slots)
+        freemask = 0
+        for i, (a, c) in enumerate(zip(args, cparams)):
+            if c == "CStr":
+                a = self.call_rt("uu_cstr_dup", a)
+                freemask |= 1 << i
+            b.store(a, b.gep(sp, [self.const(i)]))
+        b.ret(self.call_rt("uu_req_ffi", b.ptrtoint(inv, I64), slots,
+                           self.const(1 if affinity == "worker" else 0),
+                           self.const(1 if cret == "CStr" else 0), self.const(freemask)))
+
+    def ffi_invoker(self, cname: str, cparams: list[str], cret: str) -> ir.Function:
+        """`W inv(W *slots)` em convenção C: converte os slots, chama `cname` e devolve uma palavra."""
+        cache: dict[Any, ir.Function] = self.__dict__.setdefault("_ffi_invokers", {})
+        k = (cname, tuple(cparams), cret)
+        if k in cache:
+            return cache[k]
+
+        def lty(c: str) -> Any:
+            if c == "CStr":
+                return PTR
+            if c == "()":
+                return VOID
+            if c in ("f64", "f32"):
+                return F64 if c == "f64" else F32
+            return ir.IntType(1 if c == "bool" else int_bits(c))
+
+        def ext(c: str) -> str | None:
+            if c == "bool" or (c in INT_TYPES and int_bits(c) < 32 and c.startswith("u")):
+                return "zeroext"
+            if c in INT_TYPES and int_bits(c) < 32:
+                return "signext"
+            return None
+
+        cfty = ir.FunctionType(lty(cret), [lty(c) for c in cparams])
+        cfn = self.mod.globals.get(cname)
+        if cfn is None:
+            cfn = ir.Function(self.mod, cfty, name=cname)
+            for a, c in zip(cfn.args, cparams):
+                if ext(c):
+                    a.add_attribute(ext(c))
+            if ext(cret):
+                cfn.return_value.add_attribute(ext(cret))
+        elif cfn.function_type != cfty:
+            raise CodegenError(f"`@extern` declara `{cname}` com assinaturas diferentes")
+        inv = ir.Function(self.mod, ir.FunctionType(I64, [I64.as_pointer()]), name=self.name(f"uu_ffi.{cname}"))
+        ib = ir.IRBuilder(inv.append_basic_block("entry"))
+        vals = []
+        for i, c in enumerate(cparams):
+            w = ib.load(ib.gep(inv.args[0], [ir.Constant(I64, i)]))
+            if c == "CStr":
+                vals.append(ib.inttoptr(w, PTR))
+            elif c == "f64":
+                vals.append(ib.bitcast(w, F64))
+            elif c == "f32":
+                vals.append(ib.bitcast(ib.trunc(w, I32), F32))
+            elif c == "bool" or int_bits(c) < 64:
+                vals.append(ib.trunc(w, lty(c)))
+            else:
+                vals.append(w)
+        r = ib.call(cfn, vals)
+        if cret == "()":
+            out = ir.Constant(I64, 0)
+        elif cret == "CStr":
+            out = ib.ptrtoint(r, I64)
+        elif cret == "f64":
+            out = ib.bitcast(r, I64)
+        elif cret == "f32":
+            out = ib.zext(ib.bitcast(r, I32), I64)
+        elif cret == "bool" or cret.startswith("u"):
+            out = ib.zext(r, I64) if cret == "bool" or int_bits(cret) < 64 else r
+        else:
+            out = ib.sext(r, I64) if int_bits(cret) < 64 else r
+        ib.ret(out)
+        cache[k] = inv
+        return inv
 
     def num_op(self, op: str, args: list[Any], t: Type) -> Any:
         t = prune(t)

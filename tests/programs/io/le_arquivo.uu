@@ -1,0 +1,9 @@
+//> primeira linha
+//> segunda linha
+fn mostra(r: Result(Text Text)) -> Text = match r
+    Ok(t) -> t
+    Err(e) -> "erro: {e}"
+fn +main() -> Pending(int) io =
+    for r <- readFile("dados.txt")
+        _ <- print(mostra(r))
+        yield 0

@@ -1,0 +1,6 @@
+// error: io 3
+fn diz(t: Text) -> Pending(()) =
+    print(t)
+fn +main() -> Pending(int) io =
+    for _ <- diz("x")
+        yield 0

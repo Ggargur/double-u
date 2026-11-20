@@ -1,0 +1,17 @@
+//> antes: Nothing
+//> depois: Just(7) em 3 ticks
+fn estado(p: Pending(int)) -> Text = match p.poll
+    Just(v) -> "Just({v})"
+    Nothing -> "Nothing"
+fn espera(own p: Pending(int) n: int) -> Pending(int) io = match p.poll
+    Just(_) -> pure(n)
+    Nothing -> for _ <- nextTick()
+                   r <- espera(p (n + 1))
+                   yield r
+fn +main() -> Pending(int) io =
+    p = map(sleepTicks(3) u => 7)
+    contagem = espera(p.copy 0)
+    for _ <- print("antes: {estado(p)}")
+        n <- contagem
+        _ <- print("depois: {estado(p)} em {n} ticks")
+        yield 0

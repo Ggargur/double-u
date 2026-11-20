@@ -1,0 +1,9 @@
+//> 3
+//> antes do print
+//> resultado 3
+fn soma(a: int b: int) -> int = @debug((a + b))
+fn +main() -> Pending(int) io =
+    x = soma(1 2)
+    @debug("antes do print")
+    for _ <- print("resultado {x}")
+        yield 0

@@ -1,0 +1,8 @@
+// flags: -l _teste.c
+// error: io 5
+soma = @extern("C" "c_soma" (a: i32 b: i32) -> i32)
+fn calcula() -> Pending(i32) =
+    soma(1 2)
+fn +main() -> Pending(int) io =
+    for _ <- calcula()
+        yield 0
