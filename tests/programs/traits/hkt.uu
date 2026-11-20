@@ -1,0 +1,21 @@
+//> 10
+//> nada
+//> 3 4
+type +Par(T) = { +a: T  +b: T }
+trait +Mapeia(F) =
+    fn +mapeia(x: F(A) f: A -> B) -> F(B)
+impl Mapeia(Maybe) =
+    fn mapeia(m f) = match m
+        Just(x) -> Just(f(x))
+        Nothing -> Nothing
+impl Mapeia(Par) =
+    fn mapeia(p f) = Par(f(p.a) f(p.b))
+fn mostra(m: Maybe(int)) -> Text = match m
+    Just(x) -> "{x}"
+    Nothing -> "nada"
+fn +main() -> Pending(int) io =
+    p = mapeia(Par(1 2) x => x + 2)
+    for _ <- print(mostra(mapeia(Just(5) x => x * 2)))
+        _ <- print(mostra(mapeia(Nothing x => x * 2)))
+        _ <- print("{p.a} {p.b}")
+        yield 0

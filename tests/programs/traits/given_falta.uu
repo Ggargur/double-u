@@ -1,0 +1,6 @@
+// error: trait 4
+fn +soma3(a: T b: T c: T) -> T given Num(T) = a + b + c
+fn +main() -> Pending(int) io =
+    x = soma3("a" "b" "c")
+    for _ <- print(x)
+        yield 0

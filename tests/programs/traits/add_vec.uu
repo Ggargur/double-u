@@ -1,0 +1,8 @@
+//> 4.0 6.0
+type +Vec = { +x: float  +y: float }
+impl Add(Vec) =
+    fn (a) + (b) = Vec((a.x + b.x) (a.y + b.y))
+fn +main() -> Pending(int) io =
+    v = Vec(1.0 2.0) + Vec(3.0 4.0)
+    for _ <- print("{v.x} {v.y}")
+        yield 0

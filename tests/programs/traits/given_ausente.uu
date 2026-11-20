@@ -1,0 +1,5 @@
+// error: trait 2
+fn +soma(a: T b: T) -> T = a + b
+fn +main() -> Pending(int) io =
+    for _ <- print("{soma(1 2)}")
+        yield 0

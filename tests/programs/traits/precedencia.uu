@@ -1,0 +1,15 @@
+//> 7
+//> 15
+type +N = { +v: int }
+trait +Junta(T) =
+    fn +(a: T) <+> (b: T) -> T infixl 2
+impl Junta(int) =
+    fn (a) <+> (b) = a + b
+trait +Gruda(T) =
+    fn +(a: T) <*> (b: T) -> T infixl 9
+impl Gruda(int) =
+    fn (a) <*> (b) = a * b
+fn +main() -> Pending(int) io =
+    for _ <- print("{1 <+> 2 * 3}")
+        _ <- print("{1 + 2 <*> 7}")
+        yield 0

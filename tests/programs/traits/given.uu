@@ -1,0 +1,7 @@
+//> 6
+//> 1.5
+fn +soma3(a: T b: T c: T) -> T given Num(T) = a + b + c
+fn +main() -> Pending(int) io =
+    for _ <- print("{soma3(1 2 3)}")
+        _ <- print("{soma3(0.5 0.5 0.5)}")
+        yield 0
