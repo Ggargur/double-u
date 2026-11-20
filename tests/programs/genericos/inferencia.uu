@@ -1,0 +1,11 @@
+//> 14
+//> 2.5
+//> olá
+fn dobro(x) = x * 2
+fn primeiro(a b) = a
+fn metade(x) = x / 2.0
+fn +main() -> Pending(int) io =
+    for _ <- print("{dobro(7)}")
+        _ <- print("{metade(5.0)}")
+        _ <- print(primeiro("olá" 3))
+        yield 0

@@ -1,0 +1,18 @@
+//> 5
+//> 0
+//> 1.0
+//> 9.0
+type +Vec = { +x: float  +y: float }
+fn +ou(m: Maybe(T) padrao: T) -> T = match m
+    Just(x) -> x
+    Nothing -> padrao
+fn +main() -> Pending(int) io =
+    a = ou(Just(5) 0)
+    b = ou(Nothing 0)
+    v = ou(Just(Vec(1.0 2.0)) Vec(0.0 0.0))
+    w = ou(Nothing Vec(9.0 9.0))
+    for _ <- print("{a}")
+        _ <- print("{b}")
+        _ <- print("{v.x}")
+        _ <- print("{w.y}")
+        yield 0

@@ -1,0 +1,5 @@
+// error: assinatura 2
+fn +dobro(x) = x * 2
+fn +main() -> Pending(int) io =
+    for _ <- print("{dobro(7)}")
+        yield 0

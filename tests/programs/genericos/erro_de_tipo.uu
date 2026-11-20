@@ -1,0 +1,8 @@
+// error: tipo 6
+fn +ou(m: Maybe(T) padrao: T) -> T = match m
+    Just(x) -> x
+    Nothing -> padrao
+fn +main() -> Pending(int) io =
+    a = ou(Just(5) "texto")
+    for _ <- print("{a}")
+        yield 0
