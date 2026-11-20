@@ -1,0 +1,5 @@
+//> olá
+// exit: 3
+fn +main() -> Pending(int) io =
+    for _ <- print("olá")
+        yield 3

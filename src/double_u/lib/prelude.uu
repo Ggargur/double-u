@@ -1,0 +1,112 @@
+// Prelude da double-u: tipos e traits disponíveis sem import.
+
+type +Maybe(T) = Just(T) | Nothing
+type +Result(T E) = Ok(T) | Err(E)
+type +Either(A B) = Left(A) | Right(B)
+
+/// Spec de formatação já parseado: `{x:>5}`, `{x:.2f}`.
+type +Spec = { +fill: int  +align: int  +width: int  +precision: int  +kind: int }
+
+trait +Add(T) =
+    fn +(a: T) + (b: T) -> T infixl 6
+trait +Sub(T) =
+    fn +(a: T) - (b: T) -> T infixl 6
+trait +Mul(T) =
+    fn +(a: T) * (b: T) -> T infixl 7
+trait +Div(T) =
+    fn +(a: T) / (b: T) -> T infixl 7
+trait +Rem(T) =
+    fn +(a: T) % (b: T) -> T infixl 7
+trait +Pow(T) =
+    fn +(a: T) ** (b: T) -> T infixr 8
+trait +Eq(T) =
+    fn +(a: T) == (b: T) -> bool infix 4
+    fn +(a: T) != (b: T) -> bool infix 4 = not((a == b))
+trait +Ord(T) =
+    fn +(a: T) < (b: T) -> bool infix 4
+    fn +(a: T) <= (b: T) -> bool infix 4 = not((b < a))
+    fn +(a: T) > (b: T) -> bool infix 4 = b < a
+    fn +(a: T) >= (b: T) -> bool infix 4 = not((a < b))
+trait +Num(T) given Add(T) Sub(T) Mul(T) =
+    fn +fromInt(x: int) -> T
+trait +Append(T) =
+    fn +(a: T) ++ (b: T) -> T infixr 5
+trait +Format(T) =
+    fn +format(x: T spec: Spec) -> Text
+trait +Clone(T) =
+    fn +(x: T).copy -> T
+
+trait +Functor(F) =
+    fn +map(x: F(A) f: A -> B) -> F(B)
+trait +Monad(M) =
+    fn +pure(x: A) -> M(A)
+    fn +(m: M(A)) >>= (f: A -> M(B)) -> M(B) infixl 1
+trait +Filter(F) =
+    fn +filter(x: F(A) f: A -> bool) -> F(A)
+trait +Each(S) =
+    fn +each(s: S(A) f: A -> ()) -> ()
+trait +Try(M) =
+    fn +branch(m: M(A)) -> Either(A M(A))
+
+fn +not(b: bool) -> bool = if b then false else true
+
+fn +panic(msg: Text) -> T = @prim("panic")
+
+// ---------------------------------------------------------------- Maybe
+impl Functor(Maybe) =
+    fn map(m f) = match m
+        Just(x) -> Just(f(x))
+        Nothing -> Nothing
+impl Monad(Maybe) =
+    fn pure(x) = Just(x)
+    fn (m) >>= (f) = match m
+        Just(x) -> f(x)
+        Nothing -> Nothing
+impl Filter(Maybe) =
+    fn filter(m f) = match m
+        Just(x) -> if f(x) then Just(x) else Nothing
+        Nothing -> Nothing
+impl Try(Maybe) =
+    fn branch(m) = match m
+        Just(x) -> Left(x)
+        Nothing -> Right(Nothing)
+
+// ---------------------------------------------------------------- Result
+impl Functor(Result) =
+    fn map(r f) = match r
+        Ok(x) -> Ok(f(x))
+        Err(e) -> Err(e)
+impl Monad(Result) =
+    fn pure(x) = Ok(x)
+    fn (m) >>= (f) = match m
+        Ok(x) -> f(x)
+        Err(e) -> Err(e)
+impl Try(Result) =
+    fn branch(r) = match r
+        Ok(x) -> Left(x)
+        Err(e) -> Right(Err(e))
+
+// ---------------------------------------------------------------- Pending e IO
+impl Functor(Pending) =
+    fn map(p f) = @prim("pending_map")
+impl Monad(Pending) =
+    fn pure(x) = @prim("pending_pure")
+    fn (m) >>= (f) = @prim("pending_bind")
+
+fn +print(t: Text) -> Pending(()) io = @prim("req_print")
+
+// ---------------------------------------------------------------- Text
+impl Append(Text) =
+    fn (a) ++ (b) = @prim("text_concat")
+impl Eq(Text) =
+    fn (a) == (b) = @prim("text_eq")
+impl Format(Text) =
+    fn format(x spec) = @prim("fmt_text")
+impl Format(bool) =
+    fn format(x spec) = if x then "true" else "false"
+impl Format(()) =
+    fn format(x spec) = "()"
+impl Eq(bool) =
+    fn (a) == (b) = @prim("op_eq")
+impl Eq(()) =
+    fn (a) == (b) = true
