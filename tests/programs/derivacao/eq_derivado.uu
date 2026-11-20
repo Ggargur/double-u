@@ -1,0 +1,12 @@
+//> true
+//> false
+//> true
+//> false
+type +Vec = { +x: float  +y: float }
+type +Forma = Circulo(float) | Quadrado(float) | Nada
+fn +main() -> Pending(int) io =
+    for _ <- print("{Vec(1.0 2.0) == Vec(1.0 2.0)}")
+        _ <- print("{Vec(1.0 2.0) == Vec(1.0 3.0)}")
+        _ <- print("{Circulo(1.0) == Circulo(1.0)}")
+        _ <- print("{Circulo(1.0) != Circulo(1.0) || Nada == Quadrado(2.0)}")
+        yield 0

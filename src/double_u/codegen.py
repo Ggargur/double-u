@@ -533,6 +533,8 @@ class Codegen:
         h = head_name(param)
         impl = self.ck.find_impl(mi.trait.name, h)
         if impl is None:
+            if self.ck.derivable(mi.trait.name, param):
+                return self.derived(mi, inst)
             raise CodegenError(f"sem impl de {mi.trait.name} para {param}")
         fi = impl.methods.get(mi.name)
         if fi is None:
@@ -1092,6 +1094,129 @@ class Codegen:
         if bits < 64:
             return b.sext(r, I64) if dn.startswith("i") else b.zext(r, I64)
         return r
+
+
+class _Derive:
+    """Implementações derivadas estruturalmente (Eq, Format, Clone)."""
+
+    def derived(self, mi: MethodInfo, inst: list[Type]) -> ir.Function:
+        param = inst[0]
+        k = ("derive", mi.trait.name, mi.name, key(param))
+        if k in self.instances:
+            return self.instances[k]
+        if mi.name not in ("==", "format", "copy"):
+            if mi.default is None:
+                raise CodegenError(f"não sei derivar {mi.trait.name}.{mi.name}")
+            return self.instance(mi.default, inst)
+        n = len(mi.decl.params)
+        f = ir.Function(self.mod, ir.FunctionType(I64, [I64] * n), name=self.name(f"derive.{mi.trait.name}"))
+        f.calling_convention = "tailcc"
+        self.instances[k] = f
+        saved = (self.b, self.st)
+        self.start_fn(f, FnState(f, {}, scopes=[[]]))
+        getattr(self, "derive_" + {"==": "eq", "format": "format", "copy": "copy"}[mi.name])(mi, param, f)
+        self.finish_fn()
+        self.b, self.st = saved
+        return f
+
+    def concrete_ctors(self, t: Type) -> list[tuple[str, list[Type]]]:
+        t = prune(t)
+        assert isinstance(t, TCon)
+        if t.name == "#":
+            return [("#", list(t.args))]
+        ti = self.ck.find_type_info(t.name)
+        assert ti is not None
+        return [(c.name, self.ctor_field_types(c, t)) for c in ti.ctors]
+
+    def derive_copy(self, mi: MethodInfo, t: Type, f: ir.Function) -> None:
+        self.b.ret(f.args[0])
+
+    def derive_eq(self, mi: MethodInfo, t: Type, f: ir.Function) -> None:
+        a, b_ = f.args
+        b = self.b
+        ctors = self.concrete_ctors(t)
+        res = self.new_slot("eq")
+        b.store(self.const(1), res)
+        fail = b.append_basic_block("ne")
+        done = b.append_basic_block("eq_done")
+        if len(ctors) > 1:
+            ta, tb = self.load_tag(a), self.load_tag(b_)
+            ok = b.append_basic_block("tags_ok")
+            b.cbranch(b.icmp_unsigned("==", ta, tb), ok, fail)
+            b.position_at_end(ok)
+        for i, (_, ftys) in enumerate(ctors):
+            nxt = b.append_basic_block("next_ctor")
+            if len(ctors) > 1:
+                here = b.append_basic_block("ctor")
+                b.cbranch(b.icmp_unsigned("==", self.load_tag(a), self.const(i)), here, nxt)
+                b.position_at_end(here)
+            for j, ft in enumerate(ftys):
+                fa, fb = self.load_field(a, j), self.load_field(b_, j)
+                self.inc(fa, ft)
+                self.inc(fb, ft)
+                g = self.method_instance(mi, [ft])
+                r = b.call(g, [fa, fb], cconv="tailcc")
+                cont = b.append_basic_block("field_ok")
+                b.cbranch(b.trunc(r, I1), cont, fail)
+                b.position_at_end(cont)
+            b.branch(done)
+            b.position_at_end(nxt)
+            if len(ctors) == 1:
+                break
+        if not b.block.is_terminated:
+            b.branch(done)
+        b.position_at_end(fail)
+        b.store(self.const(0), res)
+        b.branch(done)
+        b.position_at_end(done)
+        self.dec(a, t)
+        self.dec(b_, t)
+        b.ret(b.load(res))
+
+    def derive_format(self, mi: MethodInfo, t: Type, f: ir.Function) -> None:
+        x, spec = f.args
+        b = self.b
+        ctors = self.concrete_ctors(t)
+        res = self.new_slot("fmt")
+        done = b.append_basic_block("fmt_done")
+        for i, (name, ftys) in enumerate(ctors):
+            nxt = b.append_basic_block("next_ctor")
+            if len(ctors) > 1:
+                here = b.append_basic_block("ctor")
+                b.cbranch(b.icmp_unsigned("==", self.load_tag(x), self.const(i)), here, nxt)
+                b.position_at_end(here)
+            if not ftys:
+                acc = self.text_const(name)
+            else:
+                acc = self.text_const(name + "(")
+                for j, ft in enumerate(ftys):
+                    if j:
+                        acc = self.call_rt("uu_text_concat", acc, self.text_const(" "))
+                    fv = self.load_field(x, j)
+                    self.inc(fv, ft)
+                    g = self.method_instance(mi, [ft])
+                    txt = b.call(g, [fv, self.spec_value((32, 0, 0, -1, 0))], cconv="tailcc")
+                    if isinstance(ft, TCon) and ft.name == "Text":
+                        txt = self.call_rt("uu_text_concat", self.text_const('"'), txt)
+                        txt = self.call_rt("uu_text_concat", txt, self.text_const('"'))
+                    acc = self.call_rt("uu_text_concat", acc, txt)
+                acc = self.call_rt("uu_text_concat", acc, self.text_const(")"))
+            b.store(acc, res)
+            b.branch(done)
+            b.position_at_end(nxt)
+            if len(ctors) == 1:
+                break
+        if not b.block.is_terminated:
+            self.call_rt("uu_panic_c", self.cstr("format: variante inválida"), ret=VOID, types=[PTR])
+            b.unreachable()
+        b.position_at_end(done)
+        self.dec(x, t)
+        b.ret(self.call_rt("uu_fmt_text", b.load(res), spec))
+
+
+for _n, _v in vars(_Derive).items():
+    if callable(_v) and not _n.startswith("__"):
+        setattr(Codegen, _n, _v)
 
 
 class CodegenError(Exception):

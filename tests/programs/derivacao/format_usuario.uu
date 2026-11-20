@@ -1,0 +1,17 @@
+//> (1.0 2.0)
+//> [  Ponto(1 2)]
+//> Ponto(1 2)
+//> Just(Ponto(3 4))
+//> #(1 "a")
+type +Vec = { +x: float  +y: float }
+type +Ponto = { +x: int  +y: int }
+impl Format(Vec) =
+    fn format(v spec) = "({v.x} {v.y})"
+fn +main() -> Pending(int) io =
+    v = Vec(1.0 2.0)
+    for _ <- print("{v}")
+        _ <- print("[{Ponto(1 2):>12}]")
+        _ <- print("{Ponto(1 2)}")
+        _ <- print("{Just(Ponto(3 4))}")
+        _ <- print("{#(1 "a")}")
+        yield 0

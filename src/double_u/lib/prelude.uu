@@ -110,3 +110,5 @@ impl Eq(bool) =
     fn (a) == (b) = @prim("op_eq")
 impl Eq(()) =
     fn (a) == (b) = true
+impl Clone(Text) =
+    fn (x).copy = x

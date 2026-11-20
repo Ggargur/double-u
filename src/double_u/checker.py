@@ -581,7 +581,8 @@ class Checker:
                     for sub in self.derive_parts(t):
                         work.append((trait, sub, pos))
                     continue
-                self.err("trait", pos, f"`{show(t)}` não implementa a trait `{trait}`")
+                cat = "format" if trait == "Format" else "trait"
+                self.err(cat, pos, f"`{show(t)}` não implementa a trait `{trait}`")
                 continue
             mp = {v.id: self.fresh(v.hint) for v in impl.vars}
             pat = subst(impl.type, mp)
@@ -603,7 +604,7 @@ class Checker:
         lst = self.impls.get((trait, head))
         return lst[0] if lst else None
 
-    DERIVABLE = ("Eq", "Format", "Hash", "Copy")
+    DERIVABLE = ("Eq", "Format", "Hash", "Copy", "Clone")
 
     def derivable(self, trait: str, t: Type) -> bool:
         if trait not in self.DERIVABLE:

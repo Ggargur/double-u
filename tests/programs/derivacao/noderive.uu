@@ -1,0 +1,7 @@
+// error: trait 5
+@noderive(Eq)
+type +Id = { +v: int }
+fn +main() -> Pending(int) io =
+    x = Id(1) == Id(1)
+    for _ <- print("{x}")
+        yield 0

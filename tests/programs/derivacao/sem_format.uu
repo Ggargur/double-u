@@ -1,0 +1,6 @@
+// error: format 5
+@noderive(Format)
+type +Segredo = { +v: int }
+fn +main() -> Pending(int) io =
+    for _ <- print("{Segredo(1)}")
+        yield 0
