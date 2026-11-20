@@ -1,0 +1,8 @@
+//> 1.5
+//> 0.1
+fn +main() -> Pending(int) io =
+    x: f32 = 1.5
+    y: f32 = 0.1
+    for _ <- print("{x}")
+        _ <- print("{y}")
+        yield 0

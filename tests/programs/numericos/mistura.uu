@@ -1,0 +1,7 @@
+// error: numerico 5
+fn +main() -> Pending(int) io =
+    a: i32 = 1
+    b: f32 = 2.0
+    c = a + b
+    for _ <- print("{c}")
+        yield 0

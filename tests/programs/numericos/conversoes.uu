@@ -1,0 +1,19 @@
+//> 3.0
+//> 2
+//> -2
+//> 255
+//> 3.5
+//> 300
+fn +main() -> Pending(int) io =
+    a: i32 = 3
+    b: f64 = 2.9
+    c: f32 = -2.7
+    d: i64 = 255
+    e: u8 = 44
+    for _ <- print("{a.f32}")
+        _ <- print("{b.int}")
+        _ <- print("{c.i16}")
+        _ <- print("{d.u8}")
+        _ <- print("{a.f64 + 0.5}")
+        _ <- print("{e.int + 256}")
+        yield 0
