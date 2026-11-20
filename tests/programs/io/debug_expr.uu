@@ -1,0 +1,7 @@
+//> 42
+//> 21
+fn +main() -> Pending(int) io =
+    x = 21
+    y = @debug(x * 2)
+    for _ <- print("{x}")
+        yield y - 42

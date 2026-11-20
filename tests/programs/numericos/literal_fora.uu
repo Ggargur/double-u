@@ -1,0 +1,5 @@
+// error: numerico 3
+fn +main() -> Pending(int) io =
+    a: u8 = 300
+    for _ <- print("{a}")
+        yield 0

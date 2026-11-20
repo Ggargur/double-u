@@ -225,6 +225,7 @@ class Checker:
         self.givens: list[tuple[str, Type]] = []
         self.deferred: list[tuple[A.Dot, Pos]] = []
         self.lit_metas: list[TVar] = []
+        self.int_lits: list[tuple[A.Lit, TVar]] = []
         self.fixity: dict[str, tuple[str, int]] = {}
         self.all_exprs: list[A.Expr] = []
         self.builtin_types: dict[str, TypeInfo] = {}
@@ -779,7 +780,7 @@ class Checker:
             return False
         if "noderive" in ti.attrs and (not ti.attrs["noderive"] or trait in ti.attrs["noderive"]):
             return False
-        if trait == "Copy" and "nocopy" in ti.attrs:
+        if trait in ("Copy", "Clone") and "nocopy" in ti.attrs:
             return False
         return True
 
@@ -882,6 +883,13 @@ class Checker:
                     unify(t, TCon("f64") if "float" in t.lits else TCon("i64"))
                 except UnifyError:
                     pass
+        for lit, v in self.int_lits:
+            t = prune(v)
+            if isinstance(t, TCon) and t.name in INT_TYPES:
+                bits = int(t.name[1:])
+                lo, hi = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if t.name[0] == "i" else (0, (1 << bits) - 1)
+                if not lo <= lit.value <= hi:
+                    self.err("numerico", lit.pos, f"literal {lit.value} não cabe em `{show(t)}` ({lo}..{hi})")
         rest = self.solve(self.global_wanted)
         rest = self.solve(rest, final=True)
         for dot, pos in self.deferred:
@@ -1000,6 +1008,8 @@ class Checker:
             v = self.fresh()
             v.lits.add(e.kind)
             self.lit_metas.append(v)
+            if e.kind == "int":
+                self.int_lits.append((e, v))
             return v
         if e.kind == "bool":
             return BOOL

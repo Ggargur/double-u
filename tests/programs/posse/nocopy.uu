@@ -1,0 +1,7 @@
+// error: trait 5
+@nocopy
+type +Handle = { +fd: int }
+fn +main() -> Pending(int) io =
+    h = Handle(3).copy
+    for _ <- print("{h.fd}")
+        yield 0

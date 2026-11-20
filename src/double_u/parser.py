@@ -699,6 +699,12 @@ class Parser:
             return A.BuiltinCall(t.pos, "extern", [strs, params, ret, affinity])
         if not self.glued():
             return A.BuiltinCall(t.pos, name, [])
+        if name == "debug":
+            # `@debug(expr)` aceita a gramática completa de expressão
+            self.next()
+            e = self.expr()
+            self.expect("PUNCT", ")")
+            return A.BuiltinCall(t.pos, name, [e])
         self.next()
         args, _ = self.items(")")
         return A.BuiltinCall(t.pos, name, args)
