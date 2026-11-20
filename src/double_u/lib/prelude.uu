@@ -174,3 +174,8 @@ fn fmtPares(es: List(#(K V)) i: int acc: Text) -> Text given Format(K) Format(V)
     if i >= len(es) then acc
     else match at(es i)
         #(k v) -> fmtPares(es (i + 1) (if i == 0 then "{k}: {v}" else acc ++ "  {k}: {v}"))
+
+trait +EachMut(S) =
+    fn +eachMut(mut s: S(A) f: A -> ()) -> ()
+impl EachMut(List) =
+    fn eachMut(xs f) = @prim("list_each_mut")

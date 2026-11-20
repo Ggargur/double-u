@@ -1,0 +1,17 @@
+//> Ok(15)
+//> Err("não é número: x")
+//> Nothing
+fn leNum(t: Text) -> Result(int Text) =
+    if t == "5" then Ok(5) else if t == "10" then Ok(10) else Err("não é número: {t}")
+fn soma(a: Text b: Text) -> Result(int Text) =
+    x = leNum(a).?
+    y = leNum(b).?
+    Ok((x + y))
+fn primeiro(xs: List(int)) -> Maybe(int) =
+    x = get(xs 0).?
+    Just((x + 1))
+fn +main() -> Pending(int) io =
+    for _ <- print("{soma("5" "10")}")
+        _ <- print("{soma("5" "x")}")
+        _ <- print("{primeiro([])}")
+        yield 0

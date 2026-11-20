@@ -1,0 +1,11 @@
+//> [30 40]
+//> [11 12 21 22]
+fn +main() -> Pending(int) io =
+    xs = [1 2 3 4]
+    ys = for x <- xs, x > 2 yield x * 10
+    zs = for a <- [10 20]
+             b <- [1 2]
+             yield a + b
+    for _ <- print("{ys}")
+        _ <- print("{zs}")
+        yield 0

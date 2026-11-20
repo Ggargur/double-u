@@ -1,0 +1,6 @@
+// error: posse 4
+fn +main() -> Pending(int) io =
+    var xs = [1 2 3]
+    ys = for !x <- xs yield x
+    for _ <- print("{ys}")
+        yield 0

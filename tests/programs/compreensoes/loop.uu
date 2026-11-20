@@ -1,0 +1,18 @@
+//> 1
+//> 2
+//> 3
+//> total 6
+fn soma(xs: List(int)) -> int =
+    var total = 0
+    for x <- xs
+        total = total + x
+    total
+fn +main() -> Pending(int) io =
+    var linhas = []
+    for x <- [1 2 3]
+        linhas = push(linhas "{x}")
+    for _ <- print(at(linhas 0))
+        _ <- print(at(linhas 1))
+        _ <- print(at(linhas 2))
+        _ <- print("total {soma([1 2 3])}")
+        yield 0

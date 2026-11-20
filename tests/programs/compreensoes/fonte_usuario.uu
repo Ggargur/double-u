@@ -1,0 +1,13 @@
+//> 6
+type +Trio(T) = { +a: T  +b: T  +c: T }
+impl Each(Trio) =
+    fn each(t f) =
+        f(t.a)
+        f(t.b)
+        f(t.c)
+fn +main() -> Pending(int) io =
+    var s = 0
+    for x <- Trio(1 2 3)
+        s = s + x
+    for _ <- print("{s}")
+        yield 0

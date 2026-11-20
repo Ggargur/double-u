@@ -10,6 +10,7 @@ Diretivas no topo do programa (comentários):
 
 from __future__ import annotations
 
+import os
 import re
 import resource
 import subprocess
@@ -69,7 +70,7 @@ def test_program(program: Path):
         for err in errors:
             assert err in got, f"faltou erro {err}; stderr:\n{proc.stderr}"
         return
-    if MAXRSS is not None:
+    if MAXRSS is not None and "sanitize" not in os.environ.get("UU_CFLAGS", ""):
         # mede o executável já compilado, isolado
         exe = program.parent / f".{program.stem}.bin"
         try:

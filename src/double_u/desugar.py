@@ -195,15 +195,15 @@ class Desugar:
             name = p.name if isinstance(p, A.PVar) else "_"
             return A.Lambda(pos, [A.Param(p.pos, name, None, mode)], body)
         if mut:
-            params = []
-            for p in pats:
-                if isinstance(p, A.PVar):
-                    params.append(A.Param(p.pos, p.name, None, "mut" if p.bang else "borrow"))
-                else:
-                    params.append(A.Param(p.pos, "_", None, "borrow"))
-            lam = A.Lambda(pos, params, body)
-            lam.multi = True  # type: ignore[attr-defined]
-            return lam
+            # `for !a b <- src`: o elemento é uma tupla; desestrutura em vars e regrava no fim
+            n = fresh("p")
+            names = [A.PVar(p.pos, p.name) if isinstance(p, A.PVar) else A.PWild(p.pos) for p in pats]
+            unpack = A.Let(pos, A.PTuple(pos, names), None, A.Name(pos, n), True)
+            back = A.Let(pos, A.PVar(pos, n), None,
+                         A.Tuple(pos, [A.Name(p.pos, p.name) if isinstance(p, A.PVar) else A.Lit(p.pos, None, "unit")
+                                       for p in pats]))
+            inner = A.Block(pos, [unpack, A.ExprStmt(pos, body), back], None)
+            return A.Lambda(pos, [A.Param(pos, n, None, "mut")], inner)
         n = fresh("p")
         pat: A.Pat = pats[0] if len(pats) == 1 else A.PTuple(pos, pats)
         inner = A.Block(pos, [A.Let(pos, pat, None, A.Name(pos, n))], body)

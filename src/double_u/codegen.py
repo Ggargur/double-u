@@ -974,7 +974,10 @@ class Codegen:
     def gen_prim(self, fi: FnInfo, f: ir.Function, ft: Type) -> None:
         assert isinstance(ft, TFn)
         name = fi.prim
-        args = [self.b.load(self.st.locals[p.local.id].ptr) for p in fi.params]  # type: ignore[attr-defined]
+        args = []
+        for p in fi.params:
+            loc = self.st.locals[p.local.id]  # type: ignore[attr-defined]
+            args.append(loc.ptr if loc.kind == "ref" else self.b.load(loc.ptr))
         # primitivas consomem os argumentos: esvazia a lista de limpeza
         self.st.scopes = [[]]
         pts = ft.params
@@ -1009,7 +1012,7 @@ class Codegen:
             return
         if name in ("fmt_text", "text_concat", "text_eq", "req_print", "list_len", "list_get", "list_at",
                     "list_push", "list_set", "list_concat", "list_fold", "list_each", "list_filter",
-                    "list_range"):
+                    "list_range", "list_each_mut"):
             b.ret(self.call_rt("uu_" + name, *args))
             return
         if name == "panic":

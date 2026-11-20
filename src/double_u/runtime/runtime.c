@@ -614,3 +614,15 @@ W uu_text_len_prim(W t) {
     uu_dec(t);
     return n;
 }
+
+W uu_list_each_mut(W slot, W f) {
+    W *sp = (W *)slot;
+    *sp = list_unique(*sp, 0);
+    Obj *o = (Obj *)*sp;
+    for (uint32_t i = 0; i < o->n; i++) {
+        uu_inc(f);
+        uu_apply1(f, (W)&o->f[i]);
+    }
+    uu_dec(f);
+    return 0;
+}

@@ -1,0 +1,10 @@
+//> Just(3)
+//> Nothing
+fn soma(a: Maybe(int) b: Maybe(int)) -> Maybe(int) =
+    for x <- a
+        y <- b
+        yield x + y
+fn +main() -> Pending(int) io =
+    for _ <- print("{soma(Just(1) Just(2))}")
+        _ <- print("{soma(Just(1) Nothing)}")
+        yield 0

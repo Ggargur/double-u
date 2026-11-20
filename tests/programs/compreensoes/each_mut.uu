@@ -1,0 +1,12 @@
+//> [2 3 4]
+//> [#(11 1) #(22 2)]
+fn +main() -> Pending(int) io =
+    var xs = [1 2 3]
+    for !x <- xs
+        x = x + 1
+    var ps = [#(10 1) #(20 2)]
+    for !pos vel <- ps
+        pos = pos + vel
+    for _ <- print("{xs}")
+        _ <- print("{ps}")
+        yield 0
