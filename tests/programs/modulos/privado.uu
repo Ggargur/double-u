@@ -1,0 +1,8 @@
+// error: visibilidade 5
+// error: visibilidade 6
+math = @import("./_math")
+fn +main() -> Pending(int) io =
+    a = math.ajuda(1)
+    s: math.Segredo = math.Vec(1.0 2.0)
+    for _ <- print("{a}")
+        yield 0

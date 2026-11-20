@@ -1,0 +1,6 @@
+// error: nome 4
+math = @import("./_math")
+fn +main() -> Pending(int) io =
+    y = 3.0.squared
+    for _ <- print("{y}")
+        yield 0

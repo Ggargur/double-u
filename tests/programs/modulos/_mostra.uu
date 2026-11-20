@@ -1,0 +1,2 @@
+trait +Mostra(T) =
+    fn +mostra(x: T) -> Text

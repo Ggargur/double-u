@@ -825,6 +825,8 @@ class Codegen:
     # ------------------------------------------------------------------ demais expressões
     def x_Dot(self, e: A.Dot) -> Any:
         ref: Ref = e.ref  # type: ignore[attr-defined]
+        if getattr(e, "qualified", False):
+            return self.ref_value(ref, self.ty(e))  # membro de módulo: `math.cross`
         if ref.kind == "field":
             obj = self.expr(e.obj)
             ctor, idx = ref.target

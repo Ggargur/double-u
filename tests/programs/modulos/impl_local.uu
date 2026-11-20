@@ -1,0 +1,8 @@
+//> ponto
+mo = @import("./_mostra")
+type +Ponto = { +x: int }
+impl mo.Mostra(Ponto) =
+    fn mostra(p) = "ponto"
+fn +main() -> Pending(int) io =
+    for _ <- print(mo.mostra(Ponto(1)))
+        yield 0

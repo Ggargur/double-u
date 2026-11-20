@@ -137,6 +137,22 @@ class ModuleInfo:
 
 
 @dataclass(eq=False)
+class ModuleRef:
+    """Valor de `nome = @import("caminho")`: o módulo importado, ligado a um nome."""
+    module: ModuleInfo
+    public: bool
+    pos: Pos
+
+
+@dataclass(eq=False)
+class Alias:
+    """`nome = mod.membro` no topo: traz um membro de outro módulo para o escopo."""
+    target: Any
+    public: bool
+    pos: Pos
+
+
+@dataclass(eq=False)
 class LocalVar:
     name: str
     ty: Type
@@ -256,10 +272,38 @@ class Checker:
         for n, k in [("Text", 0), ("List", 1), ("Pending", 1), ("Gen", 1), ("Lazy", 1)]:
             self.builtin_type(n, k, mod)
 
-    def collect(self, mod: ModuleInfo) -> None:
+    def collect(self, mod: ModuleInfo, loaded: dict[str, ModuleInfo] | None = None) -> None:
         assert mod.ast is not None
         self.modules[mod.name] = mod
         self.module = mod
+        # imports e aliases (`squared = math.squared`) antes de tudo: tipos podem ser qualificados
+        for d in mod.ast.decls:
+            if isinstance(d, A.LetDecl) and isinstance(d.expr, A.BuiltinCall) and d.expr.name == "import":
+                target = (loaded or {}).get(getattr(d, "import_key", None) or "")
+                if target is not None:
+                    self.define(mod, d.name, ModuleRef(target, d.public, d.pos), d.pos)
+                d.skip = True  # type: ignore[attr-defined]
+        for d in mod.ast.decls:
+            if isinstance(d, A.LetDecl) and d.ann is None and isinstance(d.expr, A.Dot) \
+                    and self.module_of(d.expr.obj) is not None:
+                d.skip = True  # type: ignore[attr-defined]
+                src = self.module_of(d.expr.obj)
+                assert src is not None
+                ti = src.types.get(d.expr.name)
+                if ti is not None and d.name[:1].isupper():
+                    # `World = ecs.World`: o tipo também fica visível pelo nome local
+                    if not ti.public:
+                        self.err("visibilidade", d.expr.pos, f"tipo `{ti.name}` é privado ao seu módulo")
+                    mod.types.setdefault(d.name, ti)
+                    if d.expr.name not in src.values:
+                        continue
+                try:
+                    ent = self.qualified(d.expr)
+                except Abort:
+                    continue
+                if isinstance(ent, ModuleRef):
+                    ent = ModuleRef(ent.module, d.public, d.pos)
+                self.define(mod, d.name, Alias(ent, d.public, d.pos), d.pos)
         # tipos primeiro (nomes), depois corpos de tipos, traits, funções e impls
         for d in mod.ast.decls:
             if isinstance(d, A.TypeDecl):
@@ -278,7 +322,7 @@ class Checker:
         for d in mod.ast.decls:
             if isinstance(d, A.FnDecl):
                 self.collect_fn(mod, d)
-            elif isinstance(d, A.LetDecl):
+            elif isinstance(d, A.LetDecl) and not getattr(d, "skip", False):
                 self.collect_global(mod, d)
         for d in mod.ast.decls:
             if isinstance(d, A.ImplDecl):
@@ -383,7 +427,7 @@ class Checker:
         self.fns.append(fi)
 
     def collect_impl(self, mod: ModuleInfo, d: A.ImplDecl) -> None:
-        tr = self.lookup_trait(d.trait, d.pos)
+        tr = self.lookup_trait(d.trait, d.pos, d.trait_module)
         if tr is None:
             return
         tv: dict[str, TVar] = {}
@@ -450,15 +494,85 @@ class Checker:
             if name in m.values:
                 v = m.values[name]
                 if m is self.module or getattr(v, "public", True):
-                    return v
+                    return v.target if isinstance(v, Alias) else v
         return None
 
-    def lookup_trait(self, name: str, pos: Pos) -> TraitInfo | None:
+    def lookup_trait(self, name: str, pos: Pos, module: str | None = None) -> TraitInfo | None:
+        if module is not None:
+            m = self.module_named(module, pos)
+            tr = m.traits.get(name)
+            if tr is None:
+                self.err("nome", pos, f"módulo `{module}` não tem trait `{name}`")
+                return None
+            if not tr.public:
+                self.err("visibilidade", pos, f"trait `{name}` é privada ao módulo `{module}`")
+            return tr
         for m in self.visible_modules():
             if name in m.traits:
                 return m.traits[name]
         self.err("nome", pos, f"trait `{name}` não existe")
         return None
+
+    # ------------------------------------------------------------------ módulos
+    def module_of(self, e: A.Expr) -> ModuleInfo | None:
+        """O módulo denotado por `e` (`math`, `pkg.math`), ou None se `e` não é um módulo."""
+        if isinstance(e, A.Name):
+            if self.ctx is not None and self.find_local_peek(e.name) is not None:
+                return None
+            v = self.lookup_value(e.name)
+            return v.module if isinstance(v, ModuleRef) else None
+        if isinstance(e, A.Dot):
+            outer = self.module_of(e.obj)
+            if outer is not None:
+                v = outer.values.get(e.name)
+                v = v.target if isinstance(v, Alias) else v
+                if isinstance(v, ModuleRef):
+                    if not v.public:
+                        self.err("visibilidade", e.pos, f"módulo `{e.name}` é privado ao módulo que o importa")
+                    return v.module
+        return None
+
+    def module_named(self, name: str, pos: Pos) -> ModuleInfo:
+        v = self.lookup_value(name)
+        if not isinstance(v, ModuleRef):
+            self.err("nome", pos, f"`{name}` não é um módulo importado")
+            raise Abort()
+        return v.module
+
+    def member(self, m: ModuleInfo, name: str, pos: Pos, what: str) -> Any:
+        """Membro público `name` do módulo `m`; privado é erro de visibilidade."""
+        v = m.values.get(name)
+        if v is None:
+            self.err("nome", pos, f"módulo `{what}` não tem membro `{name}`")
+            raise Abort()
+        if isinstance(v, (Alias, ModuleRef)):
+            public = v.public
+        elif isinstance(v, CtorInfo):
+            public = v.type.public
+        elif isinstance(v, MethodInfo):
+            public = v.trait.public
+        else:
+            public = getattr(v, "public", True)
+        if not public:
+            self.err("visibilidade", pos, f"`{name}` é privado ao módulo `{what}`; marque-o com `+` para exportá-lo")
+        return v.target if isinstance(v, Alias) else v
+
+    def qualified(self, d: A.Dot) -> Any:
+        m = self.module_of(d.obj)
+        assert m is not None
+        what = d.obj.name if isinstance(d.obj, A.Name) else m.name
+        return self.member(m, d.name, d.pos, what)
+
+    def qualified_type(self, t: A.TName) -> TypeInfo | None:
+        assert t.module is not None
+        m = self.module_named(t.module, t.pos)
+        ti = m.types.get(ALIASES.get(t.name, t.name))
+        if ti is None:
+            self.err("nome", t.pos, f"módulo `{t.module}` não tem tipo `{t.name}`")
+            raise Abort()
+        if not ti.public:
+            self.err("visibilidade", t.pos, f"tipo `{t.name}` é privado ao módulo `{t.module}`")
+        return ti
 
     def find_type_info(self, name: str) -> TypeInfo | None:
         for m in [*self.modules.values(), self.prelude]:
@@ -481,10 +595,16 @@ class Checker:
         if isinstance(t, A.TTuple):
             return TCon("#", [self.type_expr(x, tv, rigid_new, strict) for x in t.items])
         args = [self.type_expr(a, tv, rigid_new, strict) for a in t.args]
-        if t.name in tv:
+        if t.module is not None:
+            try:
+                ti = self.qualified_type(t)
+            except Abort:
+                return self.fresh()
+        elif t.name in tv:
             v = tv[t.name]
             return TApp(v, args) if args else v
-        ti = self.lookup_type(t.name)
+        else:
+            ti = self.lookup_type(t.name)
         if ti is None:
             if t.name[:1].isupper() and len(t.name) <= 2 or (t.name[:1].isupper() and not strict and t.name not in ("Text",)):
                 if strict:
@@ -875,6 +995,9 @@ class Checker:
         if ent is None:
             self.err("nome", e.pos, f"`{e.name}` não está definido")
             raise Abort()
+        if isinstance(ent, ModuleRef):
+            self.err("tipo", e.pos, f"`{e.name}` é um módulo; acesse seus membros com `{e.name}.membro`")
+            raise Abort()
         return self.ref_entity(e, ent, e.pos)
 
     def ref_entity(self, e: Any, ent: Any, pos: Pos) -> Type:
@@ -919,8 +1042,6 @@ class Checker:
         return None, None
 
     def e_Call(self, e: A.Call, expected: Type | None) -> Type:
-        if isinstance(e.fn, A.Dot) and self.is_module_dot(e.fn):
-            pass
         ft = self.expr(e.fn)
         names, modes = self.callee_info(e.fn)
         # argumentos nomeados
@@ -997,9 +1118,6 @@ class Checker:
         if not c.io:
             self.err("io", pos, "função pura não pode chamar função `io`; marque a função com `io`")
 
-    def is_module_dot(self, d: A.Dot) -> bool:
-        return False
-
     def e_Bang(self, e: A.Bang, expected: Type | None) -> Type:
         self.err("posse", e.pos, "`!` só pode aparecer em argumentos de chamada")
         return self.expr(e.expr)
@@ -1038,6 +1156,14 @@ class Checker:
         return pft.ret
 
     def e_Dot(self, e: A.Dot, expected: Type | None) -> Type:
+        if self.module_of(e.obj) is not None:
+            # `math.cross`: membro de módulo (módulos são valores; é acesso a campo)
+            ent = self.qualified(e)
+            if isinstance(ent, ModuleRef):
+                self.err("tipo", e.pos, f"`{e.name}` é um módulo; acesse seus membros com `.`")
+                raise Abort()
+            e.qualified = True  # type: ignore[attr-defined]
+            return self.ref_entity(e, ent, e.pos)
         ot = self.expr(e.obj)
         return self.dot(e, ot)
 
@@ -1062,6 +1188,8 @@ class Checker:
                 inst = TCon(ti.name, [self.fresh() for _ in ti.vars])
                 self.unify_at(t, inst, e.pos)
                 t = prune(t)
+            elif post is None and not cands:
+                self.no_member(e, t)
             elif post is None:
                 res = self.fresh()
                 self.deferred.append((e, e.pos))
@@ -1079,8 +1207,7 @@ class Checker:
             e.ref = Ref("field", (ctor, idx))  # type: ignore[attr-defined]
             return ftype
         if post is None:
-            self.err("nome", e.pos, f"`{show(t)}` não tem campo `{e.name}` e não há pós-fixa `{e.name}` no escopo")
-            raise Abort()
+            self.no_member(e, t)
         if isinstance(post, LocalVar):
             e.ref = Ref("local", post)  # type: ignore[attr-defined]
             ft = post.ty
@@ -1093,6 +1220,18 @@ class Checker:
             self.use_io(e.pos)
         e.postfix = True  # type: ignore[attr-defined]
         return pft.ret
+
+    def no_member(self, e: A.Dot, t: Type) -> None:
+        notes = []
+        cur = self.module
+        for alias, v in (cur.values.items() if cur else []):
+            if isinstance(v, ModuleRef):
+                f = v.module.values.get(e.name)
+                if isinstance(f, (FnInfo, MethodInfo)) and f.fixity == "postfix" and f.public:
+                    notes.append(f"traga a pós-fixa para o escopo: `{e.name} = {alias}.{e.name}`")
+        what = "o valor" if isinstance(t, TVar) else f"`{show(t)}`"
+        self.err("nome", e.pos, f"{what} não tem campo `{e.name}` e não há pós-fixa `{e.name}` no escopo", *notes)
+        raise Abort()
 
     def records_with_field(self, name: str) -> list[TypeInfo]:
         out = []
@@ -1454,7 +1593,10 @@ class Checker:
                 self.pat(sp, st, kind, irrefutable)
             return
         if isinstance(p, A.PCtor):
-            ent = self.lookup_value(p.name)
+            if p.module is not None:
+                ent = self.member(self.module_named(p.module, p.pos), p.name, p.pos, p.module)
+            else:
+                ent = self.lookup_value(p.name)
             if not isinstance(ent, CtorInfo):
                 self.err("nome", p.pos, f"construtor `{p.name}` não existe")
                 raise Abort()
@@ -1702,5 +1844,5 @@ def generated_prelude() -> str:
     return "\n".join(out)
 
 
-__all__ = ["Checker", "ModuleInfo", "FnInfo", "Ref", "CtorInfo", "TypeInfo", "ImplInfo", "MethodInfo",
+__all__ = ["Checker", "ModuleInfo", "ModuleRef", "Alias", "FnInfo", "Ref", "CtorInfo", "TypeInfo", "ImplInfo", "MethodInfo",
            "TraitInfo", "LocalVar", "generated_prelude", "FLOAT_TYPES", "INT_TYPES"]

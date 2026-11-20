@@ -1,0 +1,11 @@
+// error: orfao 5
+// error: orfao 7
+math = @import("./_math")
+mo = @import("./_mostra")
+impl mo.Mostra(math.Vec) =
+    fn mostra(x) = "vec"
+impl Format(math.Vec) =
+    fn format(x spec) = "vec"
+fn +main() -> Pending(int) io =
+    for _ <- print("oi")
+        yield 0

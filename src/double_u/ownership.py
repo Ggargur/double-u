@@ -246,7 +246,8 @@ class Ownership:
         self.expr(e.result)
 
     def x_Dot(self, e: A.Dot) -> None:
-        self.expr(e.obj)
+        if not getattr(e, "qualified", False):  # `math.cross` não usa valor nenhum
+            self.expr(e.obj)
 
     def x_LazyE(self, e: A.LazyE) -> None:
         self.expr(getattr(e, "lam", None) or e.expr)

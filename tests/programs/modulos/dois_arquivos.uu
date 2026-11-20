@@ -1,0 +1,26 @@
+//> 42
+//> -2.0
+//> 3.0
+//> 12.0
+//> 4.0
+//> 2.0
+//> 3.0
+math = @import("./_math")
+m2 = @import("./_math.uu")
+fn norma(v: math.Vec) -> float = v.x + v.y
+fn lado(f: math.Forma) -> float =
+    match f
+        math.Quadrado(l) -> l
+        math.Circulo(_) -> 0.0
+fn +main() -> Pending(int) io =
+    a = math.Vec(1.0 2.0)
+    b = m2.Vec(3.0 4.0)
+    c = math.cross
+    for _ <- print("{math.dobro(21)}")
+        _ <- print("{c(a b)}")
+        _ <- print("{norma(a)}")
+        _ <- print("{math.area(math.Circulo(2.0))}")
+        _ <- print("{math.area(math.Quadrado(2.0))}")
+        _ <- print("{lado(math.Quadrado(2.0))}")
+        _ <- print("{math.pi}")
+        yield 0

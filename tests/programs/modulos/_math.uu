@@ -1,0 +1,12 @@
+type +Vec = { +x: float  +y: float }
+type Segredo = { v: int }
++pi: float = 3.0
+fn +(a: Vec) cross (b: Vec) -> float = a.x * b.y - a.y * b.x
+fn +(x: float).squared -> float = x * x
+fn +dobro(x: int) -> int = ajuda(x) * 2
+fn ajuda(x: int) -> int = x
+type +Forma = Circulo(float) | Quadrado(float)
+fn +area(f: Forma) -> float =
+    match f
+        Circulo(r) -> r * r * pi
+        Quadrado(l) -> l * l
