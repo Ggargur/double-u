@@ -1,0 +1,2 @@
+volta = @import("./ciclo")
+fn +f(x: int) -> int = x

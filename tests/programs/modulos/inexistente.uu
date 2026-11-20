@@ -1,0 +1,5 @@
+// error: import 2
+nada = @import("./_nao_existe")
+fn +main() -> Pending(int) io =
+    for _ <- print("oi")
+        yield 0

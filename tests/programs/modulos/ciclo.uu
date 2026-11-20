@@ -1,0 +1,5 @@
+// error: import 1
+c = @import("./_ciclo")
+fn +main() -> Pending(int) io =
+    for _ <- print("oi")
+        yield 0

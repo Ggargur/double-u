@@ -1,0 +1,15 @@
+//> 9.0
+//> 4.0
+//> -2.0
+math = @import("./_math")
+squared = math.squared
+cross = math.cross
+fn +main() -> Pending(int) io =
+    x = 3.0
+    sq = math.squared
+    a = math.Vec(1.0 2.0)
+    b = math.Vec(3.0 4.0)
+    for _ <- print("{x.squared}")
+        _ <- print("{2.0.sq}")
+        _ <- print("{a cross b}")
+        yield 0

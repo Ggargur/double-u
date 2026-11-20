@@ -301,6 +301,9 @@ class Parser:
     def impl_decl(self) -> A.ImplDecl:
         start = self.expect("KW", "impl")
         module = None
+        if self.at("NAME") and self.peek().is_("PUNCT", ".") and self.peek(2).kind == "UNAME":
+            module = str(self.next().value)
+            self.next()
         trait = self.expect("UNAME", what="nome da trait")
         self.expect("PUNCT", "(")
         ty = self.type_()
@@ -839,7 +842,13 @@ class Parser:
         if self.accept("PUNCT", "!"):
             n = self.expect("NAME", what="nome")
             return A.PVar(n.pos, str(n.value), bang=True)
-        if self.at("NAME"):
+        module = None
+        if self.at("NAME") and self.peek().is_("PUNCT", ".") and not self.peek().spaced \
+                and self.peek(2).kind == "UNAME":
+            module = str(self.next().value)  # `math.Circulo(r)`: construtor qualificado
+            self.next()
+            t = self.tok
+        elif self.at("NAME"):
             self.next()
             return A.PVar(t.pos, str(t.value))
         if self.at("INT") or self.at("FLOAT"):
@@ -875,7 +884,7 @@ class Parser:
                     args.append(self.pattern())
                     names.append(nm)
                 self.expect("PUNCT", ")")
-            return A.PCtor(t.pos, str(t.value), args, names)
+            return A.PCtor(t.pos, str(t.value), args, names, module)
         if self.accept("PUNCT", "("):
             p = self.pattern()
             self.expect("PUNCT", ")")
