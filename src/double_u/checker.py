@@ -376,7 +376,44 @@ class Checker:
         self.define(mod, d.name, fi, d.pos)
         self.fns.append(fi)
 
+    def collect_extern(self, mod: ModuleInfo, d: A.LetDecl) -> None:
+        """`f = @extern("C" "nome" (params) -> T main|worker)`: primitiva `io` que devolve Pending(T)."""
+        e = d.expr
+        assert isinstance(e, A.BuiltinCall)
+        strs, params, ret, affinity = e.args
+        ok_types = set(INT_TYPES) | set(FLOAT_TYPES) | {"int", "float", "bool", "CStr"}
+
+        def ctype(t: A.TypeExpr, allow_unit: bool) -> str:
+            if isinstance(t, A.TName) and not t.args and (t.name in ok_types or (allow_unit and t.name == "()")):
+                return ALIASES.get(t.name, t.name)
+            self.err("ffi", t.pos, "tipo não suportado em `@extern`: use inteiros, floats, bool, CStr ou ()")
+            return "()"
+
+        if len(strs) != 2 or strs[0] != "C":
+            self.err("ffi", e.pos, 'use `@extern("C" "nome" (params) -> T)`')
+            strs = ["C", d.name]
+        if affinity not in ("main", "worker"):
+            self.err("ffi", e.pos, f"afinidade `{affinity}` desconhecida: use `main` ou `worker`")
+        cparams = [ctype(p.ann, False) if p.ann is not None else "()" for p in params]
+        cret = ctype(ret, True)
+        for p in params:
+            if p.ann is None:
+                self.err("ffi", p.pos, f"parâmetro `{p.name}` de `@extern` precisa de tipo")
+            if p.mode == "mut":
+                self.err("ffi", p.pos, "parâmetro de `@extern` não pode ser `mut`")
+        to_uu = lambda c: TEXT if c == "CStr" else TCon(c)  # noqa: E731
+        fi = FnInfo(d.name, mod, None, d.public, "prefix", params, e, True, pos=d.pos, annotated=True)
+        fi.prim = "extern"
+        fi.extern = (strs[1], cparams, cret, affinity)  # type: ignore[attr-defined]
+        fi.scheme = Scheme([], [], TFn([to_uu(c) for c in cparams], TCon("Pending", [to_uu(cret)]), True,
+                                       [p.mode for p in params]))
+        self.define(mod, d.name, fi, d.pos)
+        self.fns.append(fi)
+
     def collect_global(self, mod: ModuleInfo, d: A.LetDecl) -> None:
+        if isinstance(d.expr, A.BuiltinCall) and d.expr.name == "extern":
+            self.collect_extern(mod, d)
+            return
         fi = FnInfo(d.name, mod, None, d.public, "global", [], d.expr, False, pos=d.pos, is_global=True)
         fi.decl = A.FnDecl(d.pos, d.name, d.public, "prefix", [], d.ann, False, [], d.expr)
         self.define(mod, d.name, fi, d.pos)

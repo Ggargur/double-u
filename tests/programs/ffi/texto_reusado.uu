@@ -1,0 +1,9 @@
+// flags: -l _teste.c
+//> 6 6 abcdef
+tamanho = @extern("C" "c_tamanho" (s: CStr) -> int worker)
+fn +main() -> Pending(int) io =
+    nome = "abc" ++ "def"
+    for a <- tamanho(nome)
+        b <- tamanho(nome)
+        _ <- print("{a} {b} {nome}")
+        yield 0

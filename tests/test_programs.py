@@ -117,3 +117,21 @@ def test_erro_nao_gera_executavel(tmp_path: Path):
     proc = run_cli("build", str(src), "-o", str(exe))
     assert proc.returncode != 0
     assert not exe.exists()
+
+
+def test_liga_biblioteca_estatica(tmp_path: Path):
+    lib_c = ROOT / "ffi" / "_teste.c"
+    obj, lib = tmp_path / "teste.o", tmp_path / "libteste.a"
+    subprocess.run([os.environ.get("UU_CC", "clang"), "-c", str(lib_c), "-o", str(obj)], check=True)
+    subprocess.run(["ar", "rcs", str(lib), str(obj)], check=True)
+    src = tmp_path / "soma.uu"
+    src.write_text(
+        'soma = @extern("C" "c_soma" (a: i32 b: i32) -> i32)\n'
+        "fn +main() -> Pending(int) io =\n    for s <- soma(40 2)\n        _ <- print(\"{s}\")\n        yield 0\n",
+        "utf-8",
+    )
+    exe = tmp_path / "soma"
+    proc = run_cli("build", "-l", str(lib), str(src), "-o", str(exe))
+    assert proc.returncode == 0, proc.stderr
+    run = subprocess.run([str(exe)], capture_output=True, text=True)
+    assert run.stdout == "42\n"

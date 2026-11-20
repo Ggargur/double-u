@@ -1,0 +1,27 @@
+// flags: -l _teste.c
+//> 5
+//> 1.25
+//> 3.0
+//> 6
+//> olá do C
+//> -7
+soma     = @extern("C" "c_soma" (a: i32 b: i32) -> i32)
+metade   = @extern("C" "c_metade" (x: f64) -> f64 main)
+dobro32  = @extern("C" "c_dobro32" (x: f32) -> f32)
+tamanho  = @extern("C" "c_tamanho" (s: CStr) -> int worker)
+saudacao = @extern("C" "c_saudacao" () -> CStr)
+negativo = @extern("C" "c_negativo" (x: i8) -> i8)
+fn +main() -> Pending(int) io =
+    for s <- soma(2 3)
+        m <- metade(2.5)
+        d <- dobro32(1.5.f32)
+        t <- tamanho("abcdef")
+        o <- saudacao()
+        n <- negativo(7.i8)
+        _ <- print("{s}")
+        _ <- print("{m}")
+        _ <- print("{d}")
+        _ <- print("{t}")
+        _ <- print(o)
+        _ <- print("{n}")
+        yield 0

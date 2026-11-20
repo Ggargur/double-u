@@ -1,0 +1,7 @@
+// error: ffi 3
+// error: ffi 4
+f = @extern("C" "c_soma" (xs: List(int)) -> int)
+g = @extern("C" "c_soma" (a: i32) -> i32 qualquer)
+fn +main() -> Pending(int) io =
+    for _ <- print("x")
+        yield 0

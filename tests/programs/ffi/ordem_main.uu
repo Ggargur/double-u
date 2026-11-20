@@ -1,0 +1,20 @@
+// flags: -l _teste.c
+//> C: um
+//> dois
+//> C: três
+//> thread principal: 1
+//> worker: 0
+diz       = @extern("C" "c_diz" (s: CStr) -> ())
+principal = @extern("C" "c_na_principal" () -> int main)
+noWorker  = @extern("C" "c_na_principal" () -> int worker)
+fn emite() -> Pending(()) io =
+    a = diz("um")
+    b = print("dois")
+    diz("três")
+fn +main() -> Pending(int) io =
+    for _ <- emite()
+        p <- principal()
+        w <- noWorker()
+        _ <- print("thread principal: {p}")
+        _ <- print("worker: {w}")
+        yield 0
